@@ -1,8 +1,57 @@
 <!DOCTYPE html>
-<html>
-<head><title>Website Risk Checker</title></head>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Website Risk Checker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
 <body>
-  <h1>Website Risk Checker</h1>
-  <p>Coming soon.</p>
+  <main class="container">
+    <h1>Website Risk Checker</h1>
+
+    <p class="subtitle">
+      Evidence‑based risk assessment for Australian consumers.
+      If information cannot be verified, risk is scored conservatively.
+    </p>
+
+    <div class="input-card">
+      <input
+        id="siteUrl"
+        type="url"
+        placeholder="https://example.com"
+        autocomplete="off"
+      />
+      <button id="analyzeBtn">Analyze</button>
+    </div>
+
+    <div id="error" class="error hidden"></div>
+
+    <section id="results" class="results hidden">
+      <h2>Assessment Result</h2>
+
+      <div class="score">
+        <span>Total Score</span>
+        <strong id="totalScore">–</strong><span>/100</span>
+      </div>
+
+      <div id="verdict" class="verdict"></div>
+
+      <h3>Score Breakdown</h3>
+      <ul id="breakdown"></ul>
+
+      <h3>Key Findings</h3>
+      <ul id="findings"></ul>
+    </section>
+
+    <footer>
+      <p>
+        Informational only. Based on publicly available signals and visible indicators.
+      </p>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
 </body>
 </html>
