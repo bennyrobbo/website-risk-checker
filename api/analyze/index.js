@@ -28,10 +28,14 @@ module.exports = async function (context, req) {
     }
 
     // 2) Load prompt text from /shared/prompt.txt
-    const promptPath = path.join(__dirname, "..", "..", "shared", "prompt.txt");
+    
+    const fs = require("fs");
+    const path = require("path");
+
+    // ...
+    const promptPath = path.join(__dirname, "prompt.txt");
     const basePrompt = fs.readFileSync(promptPath, "utf8");
 
-    const finalPrompt = `${basePrompt}\n\nWebsite URL to assess: ${url}`;
 
     // 3) Azure OpenAI config
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
