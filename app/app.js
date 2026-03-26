@@ -9,6 +9,9 @@ const breakdownEl = document.getElementById("breakdown");
 const findingsEl = document.getElementById("findings");
 
 analyzeBtn.addEventListener("click", analyze);
+siteInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") analyze();
+});
 
 async function analyze() {
   clearUI();
@@ -16,7 +19,7 @@ async function analyze() {
   const url = siteInput.value.trim();
 
   if (!isValidUrl(url)) {
-    showError("Please enter a valid website URL (https://...).");
+    showError("Please enter a valid website URL (must start with https:// or http://).");
     return;
   }
 
@@ -30,13 +33,23 @@ async function analyze() {
       body: JSON.stringify({ url })
     });
 
+    const text = await response.text();
+
     if (!response.ok) {
-      throw new Error("Analysis failed.");
+      // Show generic message to user; log detail for troubleshooting.
+      console.error("API error:", response.status, text);
+      throw new Error("API error");
     }
 
-    const data = await response.json();
-    renderResults(data);
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error("Invalid JSON from API:", text);
+      throw new Error("Invalid JSON");
+    }
 
+    renderResults(data);
   } catch (err) {
     showError("Unable to analyze this website at the moment.");
   } finally {
@@ -46,20 +59,26 @@ async function analyze() {
 }
 
 function renderResults(data) {
-  totalScoreEl.textContent = data.totalScore ?? "–";
-  verdictEl.textContent = data.verdict ?? "";
+  totalScoreEl.textContent = typeof data.totalScore === "number" ? data.totalScore : "–";
+  verdictEl.textContent = data.verdict || "";
 
   breakdownEl.innerHTML = "";
-  for (const [key, value] of Object.entries(data.breakdown || {})) {
+  const breakdown = data.breakdown || {};
+  for (const [key, value] of Object.entries(breakdown)) {
     const li = document.createElement("li");
     li.textContent = `${humanize(key)}: ${value}`;
     breakdownEl.appendChild(li);
   }
 
   findingsEl.innerHTML = "";
-  for (const [key, items] of Object.entries(data.keyFindings || {})) {
+  const keyFindings = data.keyFindings || {};
+  for (const [key, items] of Object.entries(keyFindings)) {
     const li = document.createElement("li");
-    li.textContent = `${humanize(key)}: ${items.join("; ")}`;
+    if (Array.isArray(items)) {
+      li.textContent = `${humanize(key)}: ${items.join("; ")}`;
+    } else {
+      li.textContent = `${humanize(key)}: ${String(items)}`;
+    }
     findingsEl.appendChild(li);
   }
 
@@ -69,6 +88,7 @@ function renderResults(data) {
 function clearUI() {
   resultsEl.classList.add("hidden");
   errorEl.classList.add("hidden");
+  errorEl.textContent = "";
 }
 
 function showError(msg) {
@@ -88,6 +108,8 @@ function isValidUrl(value) {
 function humanize(str) {
   return str
     .replace(/([A-Z])/g, " $1")
-    .replace(/^./, c => c.toUpperCase());
+    .replace(/_/g, " ")
+    .trim()
+    .replace(/^./, (c) => c.toUpperCase());
 }
 ``
