@@ -4,7 +4,9 @@
   <meta charset="UTF-8" />
   <title>Website Risk Checker</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Correct CSS link -->
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 
 <body>
@@ -24,7 +26,7 @@
         autocomplete="off"
         spellcheck="false"
       />
-      <button id="analyzeBtn">Analyze</button>
+      <button id="analyzeBtn" type="button">Analyze</button>
     </div>
 
     <div id="error" class="error hidden"></div>
@@ -39,3 +41,20 @@
 
       <div id="verdict" class="verdict"></div>
 
+      <h3>Score Breakdown</h3>
+      <ul id="breakdown"></ul>
+
+      <h3>Key Findings</h3>
+      <ul id="findings"></ul>
+    </section>
+
+    <footer>
+      <p>Informational only. Based on publicly visible indicators and available evidence.</p>
+    </footer>
+  </main>
+
+  <!-- Correct JS script include (must be present, and at the bottom) -->
+  <script src="./app.js"></script>
+</body>
+</html>
+``
