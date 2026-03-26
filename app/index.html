@@ -13,7 +13,7 @@
 
     <p class="subtitle">
       Evidence‑based risk assessment for Australian consumers.
-      If information cannot be verified, risk is scored conservatively.
+      If information cannot be verified, the score is conservative.
     </p>
 
     <div class="input-card">
@@ -22,6 +22,7 @@
         type="url"
         placeholder="https://example.com"
         autocomplete="off"
+        spellcheck="false"
       />
       <button id="analyzeBtn">Analyze</button>
     </div>
@@ -38,20 +39,3 @@
 
       <div id="verdict" class="verdict"></div>
 
-      <h3>Score Breakdown</h3>
-      <ul id="breakdown"></ul>
-
-      <h3>Key Findings</h3>
-      <ul id="findings"></ul>
-    </section>
-
-    <footer>
-      <p>
-        Informational only. Based on publicly available signals and visible indicators.
-      </p>
-    </footer>
-  </main>
-
-  <script src="app.js"></script>
-</body>
-</html>
