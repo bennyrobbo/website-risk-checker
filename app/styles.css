@@ -1,6 +1,6 @@
 * {
   box-sizing: border-box;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
 }
 
 body {
@@ -10,42 +10,61 @@ body {
 }
 
 .container {
-  max-width: 800px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 32px 16px;
 }
 
 h1 {
-  margin-bottom: 4px;
+  margin: 0 0 6px 0;
 }
 
 .subtitle {
   color: #555;
-  margin-bottom: 24px;
+  margin: 0 0 22px 0;
 }
 
 .input-card {
   display: flex;
-  gap: 8px;
-  margin-bottom: 24px;
+  gap: 10px;
+  margin-bottom: 18px;
 }
 
 input {
   flex: 1;
-  padding: 12px;
+  padding: 12px 12px;
   font-size: 16px;
+  border: 1px solid #cfd7e3;
+  border-radius: 8px;
+  outline: none;
+}
+
+input:focus {
+  border-color: #5b8def;
+  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.18);
 }
 
 button {
   padding: 12px 16px;
   font-size: 16px;
   cursor: pointer;
+  border: 1px solid #cfd7e3;
+  background: #0f62fe;
+  color: white;
+  border-radius: 8px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .results {
   background: #fff;
-  padding: 24px;
-  border-radius: 6px;
+  padding: 22px;
+  border-radius: 12px;
+  border: 1px solid #e3e8f2;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.06);
 }
 
 .hidden {
@@ -54,23 +73,41 @@ button {
 
 .error {
   background: #ffe5e5;
-  color: #900;
+  color: #7a0000;
   padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #ffb3b3;
   margin-bottom: 16px;
 }
 
 .score {
-  font-size: 32px;
-  margin: 16px 0;
+  font-size: 34px;
+  margin: 14px 0 10px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.score strong {
+  font-size: 44px;
 }
 
 .verdict {
-  font-weight: bold;
-  margin-bottom: 16px;
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+
+ul {
+  margin-top: 8px;
+}
+
+li {
+  margin: 6px 0;
 }
 
 footer {
-  margin-top: 48px;
+  margin-top: 40px;
   font-size: 12px;
-  color: #777;
+  color: #667085;
 }
+``
