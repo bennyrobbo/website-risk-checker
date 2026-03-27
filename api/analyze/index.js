@@ -395,7 +395,7 @@ async function collectReputationSignals(hostname) {
     const firstListingPath = extractFirstProductReviewListingPath(searchHtml);
 
     if (!firstListingPath) {
-      out.productReviewAu = { checked: true, url: searchUrld: false };
+      out.productReviewAu = { checked: true, url: searchUrl, found: false };
     } else {
       const listingUrl = `https://www.productreview.com.au${firstListingPath}`;
       const listingHtml = await fetchText(listingUrl, TIMEOUT_MS);
