@@ -186,7 +186,7 @@ async function collectEvidence(siteUrl) {
 
   const base = new URL(siteUrl);
 
-  // ✅ NEW: make homepage fetch non-fatal
+  // Make homepage fetch non-fatal
   let homepageHtml = "";
   let homepageFetchError = null;
   try {
@@ -197,8 +197,8 @@ async function collectEvidence(siteUrl) {
   }
 
   const homepageSignals = parseSignals(homepageHtml, base.href);
-
   const policyLinks = findPolicyLinks(homepageHtml, base.href).slice(0, MAX_POLICY_PAGES);
+
   const policyPages = [];
   for (const link of policyLinks) {
     try {
@@ -216,7 +216,7 @@ async function collectEvidence(siteUrl) {
   return {
     fetchedAtUtc: new Date().toISOString(),
     inputUrl: siteUrl,
-    homepageFetchError, // ✅ NEW: included for "Unable to verify" style outputs
+    homepageFetchError,
     homepage: {
       url: base.href,
       signals: homepageSignals,
@@ -238,15 +238,9 @@ async function fetchText(url, timeoutMs) {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; WebsiteRiskChecker/1.0)" }
     });
 
-    // ✅ NEW: treat non-2xx as "no content", not fatal
     if (!res.ok) return "";
-
     const text = await res.text();
     return text || "";
-  } catch (e) {
-    // ✅ NEW: return empty instead of throwing "fetch failed" up the stack
-    // We still allow callers to record "homepageFetchError" if they wrap it.
-    throw new Error(`fetch failed for ${url}: ${String(e)}`);
   } finally {
     clearTimeout(t);
   }
@@ -295,8 +289,8 @@ function parseSignals(html, pageUrl) {
 function findPolicyLinks(html, baseUrl) {
   const links = [];
   const hrefRe = /href\s*=\s*["']([^"']+)["']/gi;
-  let m;
 
+  let m;
   while ((m = hrefRe.exec(html || "")) !== null) {
     const href = m[1];
     const abs = toAbsoluteUrl(href, baseUrl);
@@ -346,10 +340,8 @@ function uniq(arr) {
   return Array.from(new Set(arr));
 }
 
-/* --------------------------- Reputation signals (kept as-is) --------------------------- */
+/* --------------------------- Reputation signals --------------------------- */
 async function collectReputationSignals(hostname) {
-  // (your existing implementation unchanged)
-  // NOTE: kept intact to minimise drift; it already wraps each site fetch in try/catch.
   const domain = normalizeDomain(hostname);
   const TIMEOUT_MS = 9000;
 
@@ -360,6 +352,7 @@ async function collectReputationSignals(hostname) {
     productReviewAu: { checked: false, found: false }
   };
 
+  // Trustpilot
   try {
     out.trustpilot.checked = true;
     const url = `https://www.trustpilot.com/review/${domain}`;
@@ -377,6 +370,7 @@ async function collectReputationSignals(hostname) {
     out.trustpilot = { checked: true, found: false, error: String(e) };
   }
 
+  // ScamAdviser
   try {
     out.scamadviser.checked = true;
     const url = `https://www.scamadviser.com/check-website/${domain}`;
@@ -392,18 +386,22 @@ async function collectReputationSignals(hostname) {
     out.scamadviser = { checked: true, found: false, error: String(e) };
   }
 
+  // ProductReview.com.au (search then listing)
   try {
     out.productReviewAu.checked = true;
-    const searchUrltps://www.productreview.com.au/search?q=${encodeURIComponent(domain)}`;
+
+    const searchUrl = `https://www.productreview.com.au/search?q=${encodeURIComponent(domain)}`;
     const searchHtml = await fetchText(searchUrl, TIMEOUT_MS);
     const firstListingPath = extractFirstProductReviewListingPath(searchHtml);
+
     if (!firstListingPath) {
-      out.productReviewAu = { checked: true, url: searchUrl, found: false };
+      out.productReviewAu = { checked: true, url: searchUrld: false };
     } else {
       const listingUrl = `https://www.productreview.com.au${firstListingPath}`;
       const listingHtml = await fetchText(listingUrl, TIMEOUT_MS);
       const agg = extractAggregateRatingFromJsonLd(listingHtml);
       const fallback = parseProductReviewListingFallback(listingHtml);
+
       out.productReviewAu = {
         checked: true,
         url: searchUrl,
@@ -455,6 +453,7 @@ function extractJsonLdBlocks(html) {
 
 function findAggregateRatingObject(obj) {
   if (!obj) return null;
+
   if (Array.isArray(obj)) {
     for (const item of obj) {
       const r = findAggregateRatingObject(item);
@@ -462,8 +461,10 @@ function findAggregateRatingObject(obj) {
     }
     return null;
   }
+
   if (obj["@graph"]) return findAggregateRatingObject(obj["@graph"]);
   if (obj.aggregateRating && typeof obj.aggregateRating === "object") return obj.aggregateRating;
+
   for (const key of Object.keys(obj)) {
     const v = obj[key];
     if (v && typeof v === "object") {
