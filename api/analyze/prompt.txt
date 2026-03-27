@@ -28,10 +28,9 @@ Simple English rules:
 - Keep each dot point short (max ~12 words).
 - Do not exaggerate. Be balanced and practical.
 
-What counts as risk signals (examples):
-- Scam Warning Signs: missing contact details, unclear returns, missing business details, "too good to be true" claims, very thin evidence.
-- Overseas / Fulfilment Risk: unclear shipping origin, vague/long delivery times, unclear return address, unclear warehouse location.
-- If evidence is thin or the homepage could not be checked, be conservative and list unknowns.
+Special case: Access limitations
+- If the evidence shows "accessBlocked: true" or the homepage looks like a "server busy / blocked" page,
+  your key findings MUST say we could not properly verify the site.
 
 OUTPUT (JSON ONLY, no markdown, no extra text):
 Return exactly this structure (no extra keys):
