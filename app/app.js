@@ -10,13 +10,13 @@ const verdictEl = document.getElementById("verdict");
 const breakdownEl = document.getElementById("breakdown");
 const findingsEl = document.getElementById("findings");
 
-// Max points per category (matches your scoring model)
+// Max points per category (matches the updated scoring model)
 const MAX_POINTS = {
   paymentSafety: 20,
   shipping: 15,
   returnsProcess: 20,
   returnCosts: 10,
-  overseasRisk: 10,
+  scamRisk: 10,
   policyClarity: 10,
   customerExperience: 10,
   credibility: 5
@@ -28,7 +28,7 @@ const BREAKDOWN_ORDER = [
   "shipping",
   "returnsProcess",
   "returnCosts",
-  "overseasRisk",
+  "scamRisk",
   "policyClarity",
   "customerExperience",
   "credibility"
@@ -111,17 +111,31 @@ function renderResults(data) {
   findingsEl.innerHTML = "";
   const keyFindings = data.keyFindings || {};
 
-  for (const [key, items] of Object.entries(keyFindings)) {
-    const li = document.createElement("li");
-    if (Array.isArray(items)) {
-      li.textContent = `${humanize(key)}: ${items.join("; ")}`;
-    } else {
-      li.textContent = `${humanize(key)}: ${String(items)}`;
-    }
-    findingsEl.appendChild(li);
+  // Render in a consistent order if present (optional)
+  const FINDINGS_ORDER = ["paymentMethods", "shipping", "returns", "scamRisk", "reviews"];
+
+  for (const k of FINDINGS_ORDER) {
+    if (!(k in keyFindings)) continue;
+    appendFinding(k, keyFindings[k]);
+  }
+
+  // Render any extra keys (if model returns additional keys)
+  for (const [k, v] of Object.entries(keyFindings)) {
+    if (FINDINGS_ORDER.includes(k)) continue;
+    appendFinding(k, v);
   }
 
   resultsEl.classList.remove("hidden");
+}
+
+function appendFinding(key, items) {
+  const li = document.createElement("li");
+  if (Array.isArray(items)) {
+    li.textContent = `${humanize(key)}: ${items.join("; ")}`;
+  } else {
+    li.textContent = `${humanize(key)}: ${String(items)}`;
+  }
+  findingsEl.appendChild(li);
 }
 
 function clearUI() {
@@ -151,4 +165,3 @@ function humanize(str) {
     .trim()
     .replace(/^./, (c) => c.toUpperCase());
 }
-``
