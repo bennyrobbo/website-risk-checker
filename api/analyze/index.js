@@ -1,4 +1,183 @@
-// api/analyze/index.jsCredibility: 20,
+// api/analyze/index.js
+// Azure Static Web Apps (managed Functions) - Node.js (CommonJS)
+
+const fs = require("fs");
+const path = require("path");
+
+module.exports = async function (context, req) {
+  try {
+    // ---- 1) Parse + validate input ----
+    let body = req.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body); } catch { body = {}; }
+    }
+
+    const inputUrl = body && body.url ? String(body.url).trim() : "";
+    if (!inputUrl) {
+      context.res = json(400, { error: "Missing url in request body" });
+      return;
+    }
+
+    let target;
+    try {
+      target = new URL(inputUrl);
+      if (!["http:", "https:"].includes(target.protocol)) throw new Error("Bad protocol");
+    } catch {
+      context.res = json(400, { error: "Invalid URL format (must be http/https)" });
+      return;
+    }
+
+    // Basic SSRF safety (public endpoint)
+    const host = target.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".local") || host === "0.0.0.0") {
+      context.res = json(400, { error: "URL host not allowed" });
+      return;
+    }
+    if (isPrivateIp(host)) {
+      context.res = json(400, { error: "Private IP hosts are not allowed" });
+      return;
+    }
+
+    // ---- 2) Load prompt template ----
+    const promptPath = path.join(__dirname, "prompt.txt");
+    const basePrompt = fs.readFileSync(promptPath, "utf8");
+
+    // ---- 3) Collect evidence ----
+    const evidence = await collectEvidence(target.href);
+
+    // ---- 4) Collect reputation signals (lightweight) ----
+    const reputationSignals = await collectReputationSignals(target.hostname);
+
+    // ---- 5) Build final prompt ----
+    const finalPrompt =
+      `${basePrompt}\n\nWebsite URL: ${target.href}\n\n` +
+      `EVIDENCE (use ONLY this evidence; if missing, mark Unknown):\n` +
+      `${JSON.stringify({ ...evidence, reputationSignals }, null, 2)}`;
+
+    // ---- 6) Azure OpenAI config ----
+    const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+    const apiKey = process.env.AZURE_OPENAI_KEY;
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-10-21";
+
+    if (!endpoint || !apiKey || !deployment) {
+      context.res = json(500, { error: "Azure OpenAI not configured (missing env vars)" });
+      return;
+    }
+
+    // ---- 7) Call model (JSON-only) ----
+    const modelText = await callChatCompletionsWithTokenFallback({
+      endpoint,
+      apiKey,
+      deployment,
+      apiVersion,
+      prompt: finalPrompt,
+      temperature: 0.2,
+      maxOutTokens: 800
+    });
+
+    // ---- 8) Parse JSON (retry once if invalid) ----
+    let result = safeJsonParse(modelText);
+    if (!result) {
+      const retryPrompt = `${finalPrompt}\n\nIMPORTANT: Return VALID JSON ONLY. No markdown. No extra text.`;
+      const retryText = await callChatCompletionsWithTokenFallback({
+        endpoint,
+        apiKey,
+        deployment,
+        apiVersion,
+        prompt: retryPrompt,
+        temperature: 0.1,
+        maxOutTokens: 800
+      });
+
+      result = safeJsonParse(retryText);
+      if (!result) {
+        context.res = json(502, { error: "Model did not return valid JSON" });
+        return;
+      }
+    }
+
+    // ---- 9) Minimal schema checks ----
+    if (!result || !result.breakdown || !result.keyFindings) {
+      context.res = json(502, { error: "Invalid JSON structure from model" });
+      return;
+    }
+
+    // ---- 10) Confidence + access-block handling ----
+    const confidence = computeConfidence(evidence, reputationSignals);
+    const accessBlocked = Boolean(evidence && evidence.accessBlocked === true);
+
+    // Normalize scores from model (hard clamp)
+    const normalizedFromModel = normalizeBreakdown(result.breakdown);
+
+    // Option A: if access blocked, use neutral baseline breakdown
+    const breakdownFinal = accessBlocked ? neutralBaselineBreakdown() : normalizedFromModel;
+
+    // Always compute totals server-side (from clamped final scores)
+    const totalScore = computeTotalFromNormalizedBreakdown(breakdownFinal);
+
+    // Verdict: force Caution when confidence is low or access blocked
+    const verdict = computeVerdict(totalScore, confidence.score, accessBlocked);
+
+    // Build response (scores only + key findings + confidence)
+    const response = {
+      totalScore,
+      maxScore: 100,
+      verdict,
+      confidence: {
+        score: confidence.score,
+        label: confidence.label,
+        reason: confidence.reason
+      },
+      keyFindings: {
+        topRisks: safeStringArray(result.keyFindings.topRisks, 5),
+        topPositives: safeStringArray(result.keyFindings.topPositives, 5),
+        unknowns: safeStringArray(result.keyFindings.unknowns, 4)
+      },
+      breakdown: breakdownFinal
+    };
+
+    // Add a helpful note if access was blocked
+    if (accessBlocked) {
+      response.keyFindings.topRisks = uniqStrings([
+        "We could not access the full website content.",
+        "Some sites block automated checks (common for big brands).",
+        ...response.keyFindings.topRisks
+      ]).slice(0, 5);
+
+      response.keyFindings.unknowns = uniqStrings([
+        "Some details may be hidden from our checker.",
+        ...response.keyFindings.unknowns
+      ]).slice(0, 4);
+    }
+
+    context.res = {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+      body: response
+    };
+  } catch (e) {
+    context.res = json(500, { error: "Server error", detail: String(e) });
+  }
+};
+
+/* ----------------------------- Response helper ----------------------------- */
+function json(status, body) {
+  return { status, headers: { "Content-Type": "application/json" }, body };
+}
+
+/* ----------------------------- Guardrails ----------------------------- */
+function clampInt(n, min, max) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return min;
+  const v = Math.round(x);
+  return Math.max(min, Math.min(max, v));
+}
+
+function normalizeBreakdown(breakdown) {
+  const spec = {
+    paymentSecurity: 20,
+    businessCredibility: 20,
     domainWebsiteAge: 10,
     shippingReturns: 10,
     customerReviewsReputation: 10,
@@ -10,10 +189,7 @@
   const out = {};
   for (const [key, max] of Object.entries(spec)) {
     const raw = breakdown && breakdown[key] ? breakdown[key] : {};
-    out[key] = {
-      score: clampInt(raw.score, 0, max),
-      max
-    };
+    out[key] = { score: clampInt(raw.score, 0, max), max };
   }
   return out;
 }
@@ -28,7 +204,6 @@ function computeTotalFromNormalizedBreakdown(normalized) {
 
 function neutralBaselineBreakdown() {
   // Neutral-ish baseline for low-confidence / access-blocked situations (Option A).
-  // Keeps output sensible (not scary), while verdict remains "Caution" due to low confidence.
   return {
     paymentSecurity: { score: 10, max: 20 },
     businessCredibility: { score: 10, max: 20 },
@@ -42,7 +217,6 @@ function neutralBaselineBreakdown() {
 }
 
 function computeVerdict(totalScore, confidenceScore, accessBlocked) {
-  // If we couldn't properly access content, always show Caution.
   if (accessBlocked || confidenceScore < 45) return "Caution";
   if (totalScore >= 75) return "Lower risk";
   if (totalScore >= 50) return "Medium risk";
@@ -60,11 +234,13 @@ function uniqStrings(arr) {
   return Array.from(new Set((arr || []).map(s => String(s).trim()).filter(Boolean)));
 }
 
-/* ----------------------------- Confidence ----------------------------- */
+function safeJsonParse(text) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
 
+/* ----------------------------- Confidence ----------------------------- */
 function computeConfidence(evidence, reputationSignals) {
-  // Confidence is: "How much real content did we successfully observe?"
-  // Not: "How safe is the site?"
   const homepageSnippet = evidence?.homepage?.textSnippet || "";
   const homepageLen = homepageSnippet.trim().length;
 
@@ -85,23 +261,22 @@ function computeConfidence(evidence, reputationSignals) {
   const accessBlocked = Boolean(evidence && evidence.accessBlocked === true);
   const homepageFetchFailed = Boolean(evidence && evidence.homepageFetchError);
 
-  // Score components (0–100)
   let score = 0;
 
-  // Homepage content richness (0–45)
+  // Homepage richness (0–45)
   if (homepageLen >= 5000) score += 45;
   else if (homepageLen >= 2000) score += 35;
   else if (homepageLen >= 800) score += 25;
   else if (homepageLen >= 300) score += 15;
   else score += 5;
 
-  // Signals found (0–25)
+  // Signals (0–25)
   score += Math.min(25, signalCount * 4);
 
-  // Policy pages successfully fetched (0–20)
+  // Policy pages (0–20)
   score += Math.min(20, policyFetchedCount * 7);
 
-  // Reputation signals available (0–10)
+  // Reputation (0–10)
   score += Math.min(10, repFoundCount * 5);
 
   // Penalties
@@ -123,7 +298,6 @@ function computeConfidence(evidence, reputationSignals) {
 }
 
 /* ----------------------------- Azure OpenAI call ----------------------------- */
-
 async function callChatCompletionsWithTokenFallback({ endpoint, apiKey, deployment, apiVersion, prompt, temperature, maxOutTokens }) {
   try {
     return await callChatCompletions({
@@ -155,7 +329,7 @@ async function callChatCompletionsWithTokenFallback({ endpoint, apiKey, deployme
 }
 
 async function callChatCompletions({ endpoint, apiKey, deployment, apiVersion, prompt, temperature, tokenParamName, maxOutTokens }) {
-  const url = `${endpoint.replace(/\/$/, "")}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+  const url = `${endpoint.replace(/\/$/, "")}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
 
   const payload = {
     messages: [
@@ -181,13 +355,7 @@ async function callChatCompletions({ endpoint, apiKey, deployment, apiVersion, p
   return typeof content === "string" ? content.trim() : "";
 }
 
-function safeJsonParse(text) {
-  if (typeof text !== "string" || !text.trim()) return null;
-  try { return JSON.parse(text); } catch { return null; }
-}
-
 /* ----------------------------- Evidence gathering ---------------------------- */
-
 async function collectEvidence(siteUrl) {
   const MAX_CHARS = 18000;
   const TIMEOUT_MS = 9000;
@@ -373,7 +541,6 @@ function uniq(arr) {
 }
 
 /* --------------------------- Reputation signals (lightweight) --------------------------- */
-
 async function collectReputationSignals(hostname) {
   const domain = normalizeDomain(hostname);
   const TIMEOUT_MS = 9000;
@@ -384,6 +551,7 @@ async function collectReputationSignals(hostname) {
     scamadviser: { checked: false, found: false }
   };
 
+  // Trustpilot
   try {
     out.trustpilot.checked = true;
     const url = `https://www.trustpilot.com/review/${domain}`;
@@ -400,6 +568,7 @@ async function collectReputationSignals(hostname) {
     out.trustpilot = { checked: true, found: false, error: String(e) };
   }
 
+  // ScamAdviser
   try {
     out.scamadviser.checked = true;
     const url = `https://www.scamadviser.com/check-website/${domain}`;
@@ -501,7 +670,6 @@ function toInt(x) {
 }
 
 /* ----------------------------- SSRF helper ----------------------------- */
-
 function isPrivateIp(hostname) {
   const m = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;
@@ -517,215 +685,3 @@ function isPrivateIp(hostname) {
 
   return false;
 }
-// Azure Static Web Apps (managed Functions) - Node.js (CommonJS)
-
-const fs = require("fs");
-const path = require("path");
-
-module.exports = async function (context, req) {
-  try {
-    // ---- 1) Parse + validate input ----
-    let body = req.body;
-    if (typeof body === "string") {
-      try { body = JSON.parse(body); } catch { body = {}; }
-    }
-
-    const inputUrl = body && body.url ? String(body.url).trim() : "";
-    if (!inputUrl) {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-        body: { error: "Missing url in request body" }
-      };
-      return;
-    }
-
-    let target;
-    try {
-      target = new URL(inputUrl);
-      if (!["http:", "https:"].includes(target.protocol)) throw new Error("Bad protocol");
-    } catch {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-        body: { error: "Invalid URL format (must be http/https)" }
-      };
-      return;
-    }
-
-    // Basic SSRF safety (public endpoint)
-    const host = target.hostname.toLowerCase();
-    if (host === "localhost" || host.endsWith(".local") || host === "0.0.0.0") {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-        body: { error: "URL host not allowed" }
-      };
-      return;
-    }
-    if (isPrivateIp(host)) {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-        body: { error: "Private IP hosts are not allowed" }
-      };
-      return;
-    }
-
-    // ---- 2) Load prompt template ----
-    const promptPath = path.join(__dirname, "prompt.txt");
-    const basePrompt = fs.readFileSync(promptPath, "utf8");
-
-    // ---- 3) Collect evidence ----
-    const evidence = await collectEvidence(target.href);
-
-    // ---- 4) Collect reputation signals (lightweight) ----
-    const reputationSignals = await collectReputationSignals(target.hostname);
-
-    // ---- 5) Build final prompt ----
-    const finalPrompt =
-      `${basePrompt}\n\nWebsite URL: ${target.href}\n\n` +
-      `EVIDENCE (use ONLY this evidence; if missing, mark Unknown):\n` +
-      `${JSON.stringify({ ...evidence, reputationSignals }, null, 2)}`;
-
-    // ---- 6) Azure OpenAI config ----
-    const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    const apiKey = process.env.AZURE_OPENAI_KEY;
-    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-10-21";
-
-    if (!endpoint || !apiKey || !deployment) {
-      context.res = {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-        body: { error: "Azure OpenAI not configured (missing env vars)" }
-      };
-      return;
-    }
-
-    // ---- 7) Call model (JSON-only) ----
-    const modelText = await callChatCompletionsWithTokenFallback({
-      endpoint,
-      apiKey,
-      deployment,
-      apiVersion,
-      prompt: finalPrompt,
-      temperature: 0.2,
-      maxOutTokens: 800
-    });
-
-    // ---- 8) Parse JSON (retry once if invalid) ----
-    let result = safeJsonParse(modelText);
-
-    if (!result) {
-      const retryPrompt = `${finalPrompt}\n\nIMPORTANT: Return VALID JSON ONLY. No markdown. No extra text.`;
-      const retryText = await callChatCompletionsWithTokenFallback({
-        endpoint,
-        apiKey,
-        deployment,
-        apiVersion,
-        prompt: retryPrompt,
-        temperature: 0.1,
-        maxOutTokens: 800
-      });
-
-      result = safeJsonParse(retryText);
-      if (!result) {
-        context.res = {
-          status: 502,
-          headers: { "Content-Type": "application/json" },
-          body: { error: "Model did not return valid JSON" }
-        };
-        return;
-      }
-    }
-
-    // ---- 9) Minimal schema checks ----
-    if (!result || !result.breakdown || !result.keyFindings) {
-      context.res = {
-        status: 502,
-        headers: { "Content-Type": "application/json" },
-        body: { error: "Invalid JSON structure from model" }
-      };
-      return;
-    }
-
-    // ---- 10) Confidence + access-block handling ----
-    const confidence = computeConfidence(evidence, reputationSignals);
-    const accessBlocked = Boolean(evidence && evidence.accessBlocked === true);
-
-    // Normalize scores from model (hard clamp)
-    const normalizedFromModel = normalizeBreakdown(result.breakdown);
-
-    // If access was blocked / interstitial detected, use a neutral baseline (Option A)
-    // so big sites don't look "scammy" purely due to fetch limitations.
-    const breakdownFinal = accessBlocked
-      ? neutralBaselineBreakdown()
-      : normalizedFromModel;
-
-    // Always compute totals server-side from FINAL breakdown
-    const computedTotal = computeTotalFromNormalizedBreakdown(breakdownFinal);
-
-    // Verdict: if confidence is low (or access blocked), force Caution; otherwise use thresholds
-    const computedVerdict = computeVerdict(computedTotal, confidence.score, accessBlocked);
-
-    const response = {
-      totalScore: computedTotal,
-      maxScore: 100,
-      verdict: computedVerdict,
-
-      confidence: {
-        score: confidence.score,
-        label: confidence.label,
-        reason: confidence.reason
-      },
-
-      keyFindings: {
-        topRisks: safeStringArray(result.keyFindings.topRisks, 5),
-        topPositives: safeStringArray(result.keyFindings.topPositives, 5),
-        unknowns: safeStringArray(result.keyFindings.unknowns, 4)
-      },
-
-      breakdown: breakdownFinal
-    };
-
-    // If accessBlocked, help the user understand why the result is cautious
-    if (accessBlocked) {
-      response.keyFindings.topRisks = uniqStrings([
-        "We could not access the full website content.",
-        "Some sites block automated checks (common for big brands).",
-        ...response.keyFindings.topRisks
-      ]).slice(0, 5);
-
-      response.keyFindings.unknowns = uniqStrings([
-        "Some details may be hidden from our checker.",
-        ...response.keyFindings.unknowns
-      ]).slice(0, 4);
-    }
-
-    context.res = {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      body: response
-    };
-  } catch (e) {
-    context.res = {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-      body: { error: "Server error", detail: String(e) }
-    };
-  }
-};
-
-/* ----------------------------- Guardrails ----------------------------- */
-
-function clampInt(n, min, max) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return min;
-  const v = Math.round(x);
-  return Math.max(min, Math.min(max, v));
-}
-
-function normalizeBreakdown(breakdown) {
-  const spec = {
-    paymentSecurity: 20,
