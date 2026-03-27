@@ -1,27 +1,4 @@
-// app/app.js data.totalScore : "–";
-
-    // ✅ NEW: Show verdict + confidence together
-    renderVerdictAndConfidence(data.verdict, data.confidence);
-
-    // Breakdown = scores only
-    renderBreakdownScoresOnly(data.breakdown);
-
-    // Key findings = dot points
-    renderFindings(data.keyFindings);
-
-    showResults();
-  } catch (e) {
-    showError(e?.message || "Analysis failed.");
-  } finally {
-    setBusy(false);
-  }
-}
-
-analyzeBtnEl.addEventListener("click", handleAnalyze);
-siteUrlEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") handleAnalyze();
-});
-``
+// app/app.js
 
 const siteUrlEl = document.getElementById("siteUrl");
 const analyzeBtnEl = document.getElementById("analyzeBtn");
@@ -152,12 +129,10 @@ function renderBreakdownScoresOnly(breakdown) {
 }
 
 function renderVerdictAndConfidence(verdict, confidence) {
-  // Clear and rebuild verdict block
   verdictEl.innerHTML = "";
 
   const v = (verdict || "").trim() || "Caution";
 
-  // Confidence is optional, but if present we show it clearly
   const cScore = Number.isFinite(Number(confidence?.score)) ? Number(confidence.score) : null;
   const cLabel = (confidence?.label || "").trim();
   const cReason = (confidence?.reason || "").trim();
@@ -220,4 +195,22 @@ async function handleAnalyze() {
   try {
     const data = await postAnalyze(url);
 
-    // Total score + verdict
+    totalScoreEl.textContent = Number.isFinite(Number(data.totalScore)) ? data.totalScore : "–";
+
+    renderVerdictAndConfidence(data.verdict, data.confidence);
+    renderBreakdownScoresOnly(data.breakdown);
+    renderFindings(data.keyFindings);
+
+    showResults();
+  } catch (e) {
+    showError(e?.message || "Analysis failed.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+analyzeBtnEl.addEventListener("click", handleAnalyze);
+siteUrlEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") handleAnalyze();
+});
+``
