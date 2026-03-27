@@ -17,10 +17,10 @@ CATEGORIES AND MAX SCORES:
 
 IMPORTANT GUIDELINES:
 - Payment evidence counts if payment provider logos/text OR code references exist in the EVIDENCE (e.g., paypal/stripe/apple pay/visa/mastercard).
-- AUD currency shown does NOT automatically mean scam. If AUD appears alongside signals of overseas fulfilment or unclear origin, treat it as a caution indicator and explain via dot points.
+- AUD currency shown does NOT automatically mean scam. If AUD appears alongside signals of overseas fulfilment or unclear origin, treat it as a caution indicator and mention it in Key Findings.
 - External reviews should only be treated as evidence when supported by the reputationSignals object OR explicit links in the EVIDENCE.
-- If ABN/ACN/Company details are not present, reduce Business Credibility and list missing items under UnableToVerify.
-- If domain age cannot be determined from the EVIDENCE, list it under UnableToVerify (do not invent WHOIS data).
+- If ABN/ACN/Company details are not present, reduce Business Credibility.
+- If domain age cannot be determined from the EVIDENCE, treat it as unable to verify (do not invent WHOIS data).
 
 OUTPUT REQUIREMENTS (CRITICAL):
 Return VALID JSON ONLY. No markdown. No extra text.
@@ -44,72 +44,28 @@ Return JSON in EXACTLY this structure (no extra keys):
     "unknowns": ["dot point", "..."]
   },
   "breakdown": {
-    "paymentSecurity": {
-      "score": number,
-      "max": 20,
-      "evidenceFound": ["dot point", "..."],
-      "risksIdentified": ["dot point", "..."],
-      "unableToVerify": ["dot point", "..."]
-    },
-    "businessCredibility": {
-      "score": number,
-      "max": 20,
-      "evidenceFound": ["dot point", "..."],
-      "risksIdentified": ["dot point", "..."],
-      "unableToVerify": ["dot point", "..."]
-    },
-    "domainWebsiteAge": {
-      "score": number,
-      "max": 10,
-      "evidenceFound": ["dot point", "..."],
-      "risksIdentified": ["dot point", "..."],
-      "unableToVerify": ["dot point", "..."]
-    },
-    "shippingReturns": {
-      "score": number,
-      "max": 10,
-      "evidenceFound": ["dot point", "..."],
-      "risksIdentified": ["dot point", "..."],
-      "unableToVerify": ["dot point", "..."]
-    },
-    "customerReviewsReputation": {
-      "score": number,
-      "max": 10,
-      "evidenceFound": ["dot point", "..."],
-      "risksIdentified": ["dot point", "..."],
-      "unableToVerify": ["dot point", "..."]
-    },
-    "contactInfo": {
-      "score": number,
-      "max": 10,
-      "evidenceFound": ["dot point", "..."],
-      "risksIdentified": ["dot point", "..."],
-      "unableToVerify": ["dot point", "..."]
-    },
-    "scamIndicators": {
-      "score": number,
-      "max": 10,
-      "evidenceFound": ["dot point", "..."],
-      "risksIdentified": ["dot point", "..."],
-      "unableToVerify": ["dot point", "..."]
-    },
-    "overseasFulfilmentRisk": {
-      "score": number,
-      "max": 10,
-      "evidenceFound": ["dot point", "..."],
-      "risksIdentified": ["dot point", "..."],
-      "unableToVerify": ["dot point", "..."]
-    }
+    "paymentSecurity": { "score": number, "max": 20 },
+    "businessCredibility": { "score": number, "max": 20 },
+    "domainWebsiteAge": { "score": number, "max": 10 },
+    "shippingReturns": { "score": number, "max": 10 },
+    "customerReviewsReputation": { "score": number, "max": 10 },
+    "contactInfo": { "score": number, "max": 10 },
+    "scamIndicators": { "score": number, "max": 10 },
+    "overseasFulfilmentRisk": { "score": number, "max": 10 }
   }
 }
 
 RULES:
-- totalScore MUST equal the sum of all breakdown category scores.
-- Each array MUST contain at least 1 dot point (never empty).
-- Dot points must be short and plain English.
-- If evidence is thin, use verdict "Caution".
-- Use these verdict thresholds unless evidence is too limited:
+- Provide short dot points in keyFindings only (no per-category explanations).
+- Ensure each keyFindings array has at least 2 dot points (unless evidence is extremely thin).
+- Scores must be integers within range:
+  - Payment Security 0–20
+  - Business Credibility 0–20
+  - All others 0–10
+- totalScore SHOULD equal the sum of breakdown scores, but if you are unsure, still provide your best estimate.
+- Verdict guidance:
   - 75–100: Lower risk
   - 50–74: Medium risk
   - 0–49: Higher risk
+  - Use "Caution" only when evidence is too limited to judge.
 ``
