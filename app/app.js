@@ -1,3 +1,5 @@
+// /app/app.js
+
 const siteInput = document.getElementById("siteUrl");
 const analyzeBtn = document.getElementById("analyzeBtn");
 
@@ -7,6 +9,30 @@ const totalScoreEl = document.getElementById("totalScore");
 const verdictEl = document.getElementById("verdict");
 const breakdownEl = document.getElementById("breakdown");
 const findingsEl = document.getElementById("findings");
+
+// Max points per category (matches your scoring model)
+const MAX_POINTS = {
+  paymentSafety: 20,
+  shipping: 15,
+  returnsProcess: 20,
+  returnCosts: 10,
+  overseasRisk: 10,
+  policyClarity: 10,
+  customerExperience: 10,
+  credibility: 5
+};
+
+// Render order (consistent every time)
+const BREAKDOWN_ORDER = [
+  "paymentSafety",
+  "shipping",
+  "returnsProcess",
+  "returnCosts",
+  "overseasRisk",
+  "policyClarity",
+  "customerExperience",
+  "credibility"
+];
 
 analyzeBtn.addEventListener("click", analyze);
 siteInput.addEventListener("keydown", (e) => {
@@ -33,19 +59,18 @@ async function analyze() {
       body: JSON.stringify({ url })
     });
 
-    const text = await response.text();
+    const raw = await response.text();
 
     if (!response.ok) {
-      // Show generic message to user; log detail for troubleshooting.
-      console.error("API error:", response.status, text);
+      console.error("API error:", response.status, raw);
       throw new Error("API error");
     }
 
     let data;
     try {
-      data = JSON.parse(text);
+      data = JSON.parse(raw);
     } catch (e) {
-      console.error("Invalid JSON from API:", text);
+      console.error("Invalid JSON from API:", raw);
       throw new Error("Invalid JSON");
     }
 
@@ -59,19 +84,33 @@ async function analyze() {
 }
 
 function renderResults(data) {
+  // Total score
   totalScoreEl.textContent = typeof data.totalScore === "number" ? data.totalScore : "–";
+
+  // Verdict
   verdictEl.textContent = data.verdict || "";
 
+  // Score breakdown: show X/Y
   breakdownEl.innerHTML = "";
   const breakdown = data.breakdown || {};
-  for (const [key, value] of Object.entries(breakdown)) {
+
+  for (const key of BREAKDOWN_ORDER) {
+    const value = breakdown[key];
+    const max = MAX_POINTS[key];
+
     const li = document.createElement("li");
-    li.textContent = `${humanize(key)}: ${value}`;
+    if (typeof value === "number" && typeof max === "number") {
+      li.textContent = `${humanize(key)}: ${value}/${max}`;
+    } else {
+      li.textContent = `${humanize(key)}: Not scored`;
+    }
     breakdownEl.appendChild(li);
   }
 
+  // Key findings
   findingsEl.innerHTML = "";
   const keyFindings = data.keyFindings || {};
+
   for (const [key, items] of Object.entries(keyFindings)) {
     const li = document.createElement("li");
     if (Array.isArray(items)) {
