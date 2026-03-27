@@ -1,175 +1,4 @@
-// /api/analyze/index.js
-// Azure Static Web Apps (managed Functions) - Node.js (CommonJS)
-
-const fs = require("fs");
-const path = require("path");
-
-module.exports = async function (context, req) {
-  try {
-    // ---- 1) Parse + validate input ----
-    let body = req.body;
-    if (typeof body === "string") {
-      try { body = JSON.parse(body); } catch { body = {}; }
-    }
-
-    const inputUrl = body && body.url ? String(body.url).trim() : "";
-    if (!inputUrl) {
-      context.res = { status: 400, body: { error: "Missing url in request body" } };
-      return;
-    }
-
-    let target;
-    try {
-      target = new URL(inputUrl);
-      if (!["http:", "https:"].includes(target.protocol)) throw new Error("Bad protocol");
-    } catch {
-      context.res = { status: 400, body: { error: "Invalid URL format (must be http/https)" } };
-      return;
-    }
-
-    // Basic SSRF safety (public endpoint)
-    const host = target.hostname.toLowerCase();
-    if (host === "localhost" || host.endsWith(".local") || host === "0.0.0.0") {
-      context.res = { status: 400, body: { error: "URL host not allowed" } };
-      return;
-    }
-    if (isPrivateIp(host)) {
-      context.res = { status: 400, body: { error: "Private IP hosts are not allowed" } };
-      return;
-    }
-
-    // ---- 2) Load prompt template (kept with this function) ----
-    const promptPath = path.join(__dirname, "prompt.txt");
-    const basePrompt = fs.readFileSync(promptPath, "utf8");
-
-    // ---- 3) Collect evidence (homepage + key policy pages) ----
-    const evidence = await collectEvidence(target.href);
-
-    // ---- 4) Collect reputation signals (external review sites) ----
-    const reputationSignals = await collectReputationSignals(target.hostname);
-
-    // ---- 5) Build final prompt ----
-    const finalPrompt =
-      `${basePrompt}\n\nWebsite URL: ${target.href}\n\n` +
-      `EVIDENCE (use ONLY this evidence; if missing, mark Not verifiable):\n` +
-      `${JSON.stringify({ ...evidence, reputationSignals }, null, 2)}`;
-
-    // ---- 6) Azure OpenAI config ----
-    const endpoint = process.env.AZURE_OPENAI_ENDPOINT;     // e.g. https://xxxx.openai.azure.com
-    const apiKey = process.env.AZURE_OPENAI_KEY;            // key for SAME resource
-    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT; // deployment NAME (not model name)
-    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-10-21";
-
-    if (!endpoint || !apiKey || !deployment) {
-      context.res = { status: 500, body: { error: "Azure OpenAI not configured (missing env vars)" } };
-      return;
-    }
-
-    // ---- 7) Call model (JSON-only) ----
-    // Some newer models require max_completion_tokens instead of max_tokens.
-    const modelText = await callChatCompletionsWithTokenFallback({
-      endpoint,
-      apiKey,
-      deployment,
-      apiVersion,
-      prompt: finalPrompt,
-      temperature: 0.2,
-      maxOutTokens: 1300
-    });
-
-    // ---- 8) Parse JSON (retry once if invalid) ----
-    let result = safeJsonParse(modelText);
-    if (!result) {
-      const retryPrompt = `${finalPrompt}\n\nIMPORTANT: Return VALID JSON ONLY. No markdown. No extra text.`;
-      const retryText = await callChatCompletionsWithTokenFallback({
-        endpoint,
-        apiKey,
-        deployment,
-        apiVersion,
-        prompt: retryPrompt,
-        temperature: 0.1,
-        maxOutTokens: 1300
-      });
-
-      result = safeJsonParse(retryText);
-      if (!result) {
-        context.res = { status: 502, body: { error: "Model did not return valid JSON" } };
-        return;
-      }
-    }
-
-    // ---- 9) Minimal schema sanity checks ----
-    if (!result || typeof result.totalScore !== "number" || !result.breakdown || !result.keyFindings || !result.verdict) {
-      context.res = { status: 502, body: { error: "Invalid JSON structure from model" } };
-      return;
-    }
-
-    context.res = {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      body: result
-    };
-  } catch (e) {
-    context.res = { status: 500, body: { error: "Server error", detail: String(e) } };
-  }
-};
-
-/* ----------------------------- Azure OpenAI call ----------------------------- */
-/* Uses Azure OpenAI Chat Completions REST endpoint format. */
-async function callChatCompletionsWithTokenFallback({ endpoint, apiKey, deployment, apiVersion, prompt, temperature, maxOutTokens }) {
-  try {
-    return await callChatCompletions({
-      endpoint,
-      apiKey,
-      deployment,
-      apiVersion,
-      prompt,
-      temperature,
-      tokenParamName: "max_completion_tokens",
-      maxOutTokens
-    });
-  } catch (err) {
-    const msg = String(err && err.message ? err.message : err);
-    if (msg.includes("Unsupported parameter") && msg.includes("max_completion_tokens")) {
-      return await callChatCompletions({
-        endpoint,
-        apiKey,
-        deployment,
-        apiVersion,
-        prompt,
-        temperature,
-        tokenParamName: "max_tokens",
-        maxOutTokens
-      });
-    }
-    throw err;
-  }
-}
-
-async function callChatCompletions({ endpoint, apiKey, deployment, apiVersion, prompt, temperature, tokenParamName, maxOutTokens }) {
-  const url = `${endpoint.replace(/\/$/, "")}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
-
-  const payload = {
-    messages: [
-      { role: "system", content: "You are a strict JSON generator. Output JSON only." },
-      { role: "user", content: prompt }
-    ],
-    temperature
-  };
-  payload[tokenParamName] = maxOutTokens;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "api-key": apiKey },
-    body: JSON.stringify(payload)
-  });
-
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Azure OpenAI error ${res.status}: ${text}`);
-
-  let json;
-  try { json = JSON.parse(text); } catch { return text; }
-  const content = json?.choices?.[0]?.message?.content;
+// api/analyze/index.js const content = json?.choices?.[0]?.message?.content;
   return typeof content === "string" ? content.trim() : "";
 }
 
@@ -178,7 +7,7 @@ function safeJsonParse(text) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
-/* ----------------------------- Evidence gathering ---------------------------- */
+/* ----------------------------- Evidence gathering --------------------------- */
 async function collectEvidence(siteUrl) {
   const MAX_CHARS = 18000;
   const TIMEOUT_MS = 9000;
@@ -288,7 +117,7 @@ function parseSignals(html, pageUrl) {
 
 function findPolicyLinks(html, baseUrl) {
   const links = [];
-  const hrefRe = /href\s*=\s*["']([^"']+)["']/gi;
+  const hrefRe = /href\s*=\s*[^"']+["']/gi;
 
   let m;
   while ((m = hrefRe.exec(html || "")) !== null) {
@@ -340,7 +169,7 @@ function uniq(arr) {
   return Array.from(new Set(arr));
 }
 
-/* --------------------------- Reputation signals --------------------------- */
+/* --------------------------- Reputation signals ---------------------------- */
 async function collectReputationSignals(hostname) {
   const domain = normalizeDomain(hostname);
   const TIMEOUT_MS = 9000;
@@ -562,3 +391,203 @@ function isPrivateIp(hostname) {
 
   return false;
 }
+// Azure Static Web Apps (managed Functions) - Node.js (CommonJS)
+
+const fs = require("fs");
+const path = require("path");
+
+module.exports = async function (context, req) {
+  try {
+    // ---- 1) Parse + validate input ----
+    let body = req.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body); } catch { body = {}; }
+    }
+
+    const inputUrl = body && body.url ? String(body.url).trim() : "";
+    if (!inputUrl) {
+      context.res = { status: 400, body: { error: "Missing url in request body" } };
+      return;
+    }
+
+    let target;
+    try {
+      target = new URL(inputUrl);
+      if (!["http:", "https:"].includes(target.protocol)) throw new Error("Bad protocol");
+    } catch {
+      context.res = { status: 400, body: { error: "Invalid URL format (must be http/https)" } };
+      return;
+    }
+
+    // Basic SSRF safety (public endpoint)
+    const host = target.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".local") || host === "0.0.0.0") {
+      context.res = { status: 400, body: { error: "URL host not allowed" } };
+      return;
+    }
+    if (isPrivateIp(host)) {
+      context.res = { status: 400, body: { error: "Private IP hosts are not allowed" } };
+      return;
+    }
+
+    // ---- 2) Load prompt template ----
+    const promptPath = path.join(__dirname, "prompt.txt");
+    const basePrompt = fs.readFileSync(promptPath, "utf8");
+
+    // ---- 3) Collect evidence ----
+    const evidence = await collectEvidence(target.href);
+
+    // ---- 4) Collect reputation signals ----
+    const reputationSignals = await collectReputationSignals(target.hostname);
+
+    // ---- 5) Build final prompt ----
+    const finalPrompt =
+      `${basePrompt}\n\nWebsite URL: ${target.href}\n\n` +
+      `EVIDENCE (use ONLY this evidence; if missing, mark Not verifiable):\n` +
+      `${JSON.stringify({ ...evidence, reputationSignals }, null, 2)}`;
+
+    // ---- 6) Azure OpenAI config ----
+    const endpoint = process.env.AZURE_OPENAI_ENDPOINT;     // e.g. https://xxxx.openai.azure.com
+    const apiKey = process.env.AZURE_OPENAI_KEY;            // key for SAME resource
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT; // deployment NAME (not model name)
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-10-21";
+
+    if (!endpoint || !apiKey || !deployment) {
+      context.res = { status: 500, body: { error: "Azure OpenAI not configured (missing env vars)" } };
+      return;
+    }
+
+    // ---- 7) Call model (JSON-only) ----
+    const modelText = await callChatCompletionsWithTokenFallback({
+      endpoint,
+      apiKey,
+      deployment,
+      apiVersion,
+      prompt: finalPrompt,
+      temperature: 0.2,
+      maxOutTokens: 1300
+    });
+
+    // ---- 8) Parse JSON (retry once if invalid) ----
+    let result = safeJsonParse(modelText);
+
+    if (!result) {
+      const retryPrompt = `${finalPrompt}\n\nIMPORTANT: Return VALID JSON ONLY. No markdown. No extra text.`;
+      const retryText = await callChatCompletionsWithTokenFallback({
+        endpoint,
+        apiKey,
+        deployment,
+        apiVersion,
+        prompt: retryPrompt,
+        temperature: 0.1,
+        maxOutTokens: 1300
+      });
+
+      result = safeJsonParse(retryText);
+      if (!result) {
+        context.res = { status: 502, body: { error: "Model did not return valid JSON" } };
+        return;
+      }
+    }
+
+    // ---- 9) Minimal schema sanity checks ----
+    // NOTE: We no longer require totalScore to be correct (or even present),
+    // because we compute it server-side from breakdown scores.
+    if (!result || !result.breakdown || !result.keyFindings || !result.verdict) {
+      context.res = { status: 502, body: { error: "Invalid JSON structure from model" } };
+      return;
+    }
+
+    // ✅ Step B-2: Always compute totals server-side (prevents model arithmetic errors)
+    result.totalScore = computeTotalFromBreakdown(result.breakdown);
+    result.maxScore = 100;
+
+    context.res = {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+      body: result
+    };
+  } catch (e) {
+    context.res = { status: 500, body: { error: "Server error", detail: String(e) } };
+  }
+};
+
+/* ----------------------------- Total score calc ----------------------------- */
+function computeTotalFromBreakdown(breakdown) {
+  const keys = [
+    "paymentSecurity",
+    "businessCredibility",
+    "domainWebsiteAge",
+    "shippingReturns",
+    "customerReviewsReputation",
+    "contactInfo",
+    "scamIndicators",
+    "overseasFulfilmentRisk"
+  ];
+
+  let total = 0;
+
+  for (const k of keys) {
+    const score = breakdown && breakdown[k] ? Number(breakdown[k].score) : 0;
+    total += Number.isFinite(score) ? score : 0;
+  }
+
+  return total;
+}
+
+/* ----------------------------- Azure OpenAI call ---------------------------- */
+async function callChatCompletionsWithTokenFallback({ endpoint, apiKey, deployment, apiVersion, prompt, temperature, maxOutTokens }) {
+  try {
+    return await callChatCompletions({
+      endpoint,
+      apiKey,
+      deployment,
+      apiVersion,
+      prompt,
+      temperature,
+      tokenParamName: "max_completion_tokens",
+      maxOutTokens
+    });
+  } catch (err) {
+    const msg = String(err && err.message ? err.message : err);
+    if (msg.includes("Unsupported parameter") && msg.includes("max_completion_tokens")) {
+      return await callChatCompletions({
+        endpoint,
+        apiKey,
+        deployment,
+        apiVersion,
+        prompt,
+        temperature,
+        tokenParamName: "max_tokens",
+        maxOutTokens
+      });
+    }
+    throw err;
+  }
+}
+
+async function callChatCompletions({ endpoint, apiKey, deployment, apiVersion, prompt, temperature, tokenParamName, maxOutTokens }) {
+  const url = `${endpoint.replace(/\/$/, "")}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+
+  const payload = {
+    messages: [
+      { role: "system", content: "You are a strict JSON generator. Output JSON only." },
+      { role: "user", content: prompt }
+    ],
+    temperature
+  };
+
+  payload[tokenParamName] = maxOutTokens;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "api-key": apiKey },
+    body: JSON.stringify(payload)
+  });
+
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Azure OpenAI error ${res.status}: ${text}`);
+
+  let json;
+  try { json = JSON.parse(text); } catch { return text; }
+
