@@ -13,13 +13,13 @@ const findingsEl = document.getElementById("findings");
 // Max points per category (matches the updated scoring model)
 const MAX_POINTS = {
   paymentSafety: 20,
-  shipping: 15,
-  returnsProcess: 20,
+  shipping: 10,
+  returnsProcess: 15,
   returnCosts: 10,
-  scamRisk: 10,
+  scamRisk: 15,
   policyClarity: 10,
   customerExperience: 10,
-  credibility: 5
+  credibility: 10
 };
 
 // Render order (consistent every time)
