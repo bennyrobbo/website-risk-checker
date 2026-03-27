@@ -1,4 +1,27 @@
-// app/app.js
+// app/app.js data.totalScore : "–";
+
+    // ✅ NEW: Show verdict + confidence together
+    renderVerdictAndConfidence(data.verdict, data.confidence);
+
+    // Breakdown = scores only
+    renderBreakdownScoresOnly(data.breakdown);
+
+    // Key findings = dot points
+    renderFindings(data.keyFindings);
+
+    showResults();
+  } catch (e) {
+    showError(e?.message || "Analysis failed.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+analyzeBtnEl.addEventListener("click", handleAnalyze);
+siteUrlEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") handleAnalyze();
+});
+``
 
 const siteUrlEl = document.getElementById("siteUrl");
 const analyzeBtnEl = document.getElementById("analyzeBtn");
@@ -67,7 +90,9 @@ function isValidHttpUrl(url) {
 }
 
 function safeArray(x) {
-  return Array.isArray(x) ? x.filter(v => typeof v === "string" && v.trim().length > 0) : [];
+  return Array.isArray(x)
+    ? x.filter(v => typeof v === "string" && v.trim().length > 0)
+    : [];
 }
 
 function addBullets(parent, items) {
@@ -126,6 +151,39 @@ function renderBreakdownScoresOnly(breakdown) {
   }
 }
 
+function renderVerdictAndConfidence(verdict, confidence) {
+  // Clear and rebuild verdict block
+  verdictEl.innerHTML = "";
+
+  const v = (verdict || "").trim() || "Caution";
+
+  // Confidence is optional, but if present we show it clearly
+  const cScore = Number.isFinite(Number(confidence?.score)) ? Number(confidence.score) : null;
+  const cLabel = (confidence?.label || "").trim();
+  const cReason = (confidence?.reason || "").trim();
+
+  const headline = document.createElement("div");
+  headline.style.fontWeight = "700";
+
+  if (cScore !== null && cLabel) {
+    headline.textContent = `${v} — Confidence: ${cLabel} (${cScore}/100)`;
+  } else if (cScore !== null) {
+    headline.textContent = `${v} — Confidence: ${cScore}/100`;
+  } else {
+    headline.textContent = v;
+  }
+
+  verdictEl.appendChild(headline);
+
+  if (cReason) {
+    const sub = document.createElement("div");
+    sub.style.marginTop = "6px";
+    sub.style.opacity = "0.9";
+    sub.textContent = cReason;
+    verdictEl.appendChild(sub);
+  }
+}
+
 async function postAnalyze(url) {
   const res = await fetch("/api/analyze", {
     method: "POST",
@@ -162,23 +220,4 @@ async function handleAnalyze() {
   try {
     const data = await postAnalyze(url);
 
-    // Backend guarantees these exist when successful. [1](https://microsoftapc-my.sharepoint.com/personal/benrobinson_microsoft_com/Documents/Microsoft%20Copilot%20Chat%20Files/index.js)
-    totalScoreEl.textContent = Number.isFinite(Number(data.totalScore)) ? data.totalScore : "–";
-    verdictEl.textContent = data.verdict || "";
-
-    renderBreakdownScoresOnly(data.breakdown);
-    renderFindings(data.keyFindings);
-
-    showResults();
-  } catch (e) {
-    showError(e?.message || "Analysis failed.");
-  } finally {
-    setBusy(false);
-  }
-}
-
-analyzeBtnEl.addEventListener("click", handleAnalyze);
-siteUrlEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") handleAnalyze();
-});
-``
+    // Total score + verdict
