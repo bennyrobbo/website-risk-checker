@@ -124,7 +124,7 @@ async function callChatCompletions({ endpoint, apiKey, deployment, apiVersion, p
       { role: "user", content: prompt }
     ],
     temperature,
-    max_tokens: maxTokens
+    max_completion_tokens: maxTokens
   };
 
   const res = await fetch(url, {
