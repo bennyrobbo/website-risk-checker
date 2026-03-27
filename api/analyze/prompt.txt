@@ -6,7 +6,9 @@ Do NOT browse the web. Do NOT assume legitimacy without evidence.
 If information cannot be verified from the provided EVIDENCE it MUST be treated as:
 "Not verifiable from available evidence".
 
-AUD pricing is not inherently suspicious but may indicate display currency rather than settlement currency (potential FX / foreign settlement risk).
+AU buyer note:
+- AUD pricing is not inherently suspicious but may indicate display currency rather than settlement currency (potential FX / foreign settlement risk).
+- Overseas fulfilment is not automatically a scam; it is a delivery/returns risk unless combined with other red flags.
 
 ---------------------------------------
 SCORING MODEL (Total = 100)
@@ -44,7 +46,7 @@ Policy Clarity & Transparency (10 points)
 0 → Missing/confusing
 
 Customer Experience Signals (10 points)
-10 → Positive trust signals
+10 → Positive trust signals (from evidence provided)
 5 → Mixed
 0 → Negative
 
@@ -54,21 +56,34 @@ Website & Business Credibility (10 points)
 0 → Suspicious / unverifiable entity
 
 ---------------------------------------
-SCAM SIGNALS EVALUATION RULES
+EVIDENCE INTERPRETATION RULES
 ---------------------------------------
 
-Assess likelihood of scam using ONLY provided EVIDENCE.
+Structured signals present in EVIDENCE are valid verification, including:
+- Payment identifiers/logos referenced in HTML/scripts
+- Policy pages and their text snippets
+- Shipping/returns terms in policy snippets
+- Contact identity signals (ABN/ACN, address, phone, jurisdiction)
+- Currency/settlement language
+- reputationSignals object (external review site signals)
+
+Only use “Not verifiable from available evidence” if the signal is absent, conflicting, or not explicit.
+
+---------------------------------------
+SCAM SIGNALS EVALUATION RULES (15 points)
+---------------------------------------
+
+Assess likelihood of scam using ONLY EVIDENCE.
 
 Major scam indicators include:
-
-• No ABN, address, legal entity name, or jurisdiction
-• Bank transfer or crypto preferred
-• No returns policy or extremely restrictive terms
-• Countdown pressure + extreme discounting
-• Currency/merchant settlement ambiguity not disclosed
-• Brand inconsistencies across pages
-• Conflicting policy statements
-• No meaningful contact details
+- No ABN/address/legal entity name/jurisdiction
+- Bank transfer or crypto preferred/required
+- No returns policy or extremely restrictive terms
+- Pressure tactics (countdowns) + extreme discounting
+- Currency/settlement ambiguity not disclosed
+- Brand inconsistencies across pages
+- Conflicting policy statements
+- No meaningful contact details
 
 Overseas fulfilment alone does NOT imply scam risk,
 but overseas fulfilment COMBINED WITH:
@@ -76,33 +91,48 @@ but overseas fulfilment COMBINED WITH:
 - hidden entity identity
 - currency ambiguity
 - vague policies
-
 SHOULD reduce Scam Risk score.
+
+If evidence is insufficient, score conservatively but do NOT set scamRisk to 0 unless multiple strong red flags exist.
+
+---------------------------------------
+EXTERNAL REPUTATION SIGNALS (use ONLY if provided)
+---------------------------------------
+
+EVIDENCE may include reputationSignals gathered from independent sites such as:
+- Trustpilot
+- ScamAdviser
+- ProductReview.com.au
+
+Rules:
+- Only use external reputation evidence if reputationSignals is present in EVIDENCE.
+- Do NOT invent ratings, review counts, or trust scores.
+- Do NOT treat on-site testimonials as independent reputation.
+
+Interpretation:
+- Very low ratings / very low trust scores / high complaint indicators (if present) should reduce customerExperience and/or scamRisk.
+- Absence of a listing is NOT proof of legitimacy or scam; treat as “not found” / “not verifiable” rather than a negative.
+- If external sources are blocked or unavailable, note "Not verifiable from available evidence".
 
 ---------------------------------------
 CURRENCY & LOCATION CHECK
 ---------------------------------------
 
 If evidence suggests:
-• charges processed in USD (while displaying AUD)
-• merchant legal jurisdiction overseas
-• FX or international transaction disclosures absent
+- charges processed in USD while displaying AUD
+- merchant legal jurisdiction overseas
+- FX/international transaction disclosures absent
+record a risk note under paymentMethods.
 
-record a risk finding under paymentMethods.
-
-AU identity signals such as ABN / AU address increase
-Credibility but do NOT override poor policies.
+AU identity signals such as ABN/AU address increase Credibility but do NOT override poor policies.
 
 ---------------------------------------
 OUTPUT REQUIREMENTS
 ---------------------------------------
 
 Be objective and evidence-based.
-
 Do not label a site as a scam unless multiple strong red flags exist.
-
-If uncertain:
-describe elevated risk rather than certainty.
+If uncertain: describe elevated risk rather than certainty.
 
 ---------------------------------------
 RETURN FORMAT
@@ -132,3 +162,11 @@ Return JSON ONLY.
   },
   "verdict": "Low risk" | "Medium risk" | "High risk" | "Avoid"
 }
+
+Rules:
+- Each list in keyFindings must contain 1–4 items max.
+- If unknown/unverified, say: "Not verifiable from available evidence".
+- If currency/base currency is ambiguous, include a short note under paymentMethods like:
+  “Currency base/settlement not verifiable; possible FX/international transaction fees.”
+
+Website URL and EVIDENCE will be supplied after this prompt.
