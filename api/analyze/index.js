@@ -58,16 +58,16 @@ module.exports = async function (context, req) {
     const promptPath = path.join(__dirname, "prompt.txt");
     const basePrompt = fs.readFileSync(promptPath, "utf8");
 
-    // ---- 3) Collect evidence (homepage + key policy pages) ----
+    // ---- 3) Collect evidence ----
     const evidence = await collectEvidence(target.href);
 
-    // ---- 4) Collect reputation signals (external review sites) ----
+    // ---- 4) Collect reputation signals (lightweight) ----
     const reputationSignals = await collectReputationSignals(target.hostname);
 
     // ---- 5) Build final prompt ----
     const finalPrompt =
       `${basePrompt}\n\nWebsite URL: ${target.href}\n\n` +
-      `EVIDENCE (use ONLY this evidence; if missing, mark Not verifiable):\n` +
+      `EVIDENCE (use ONLY this evidence; if missing, mark Unknown):\n` +
       `${JSON.stringify({ ...evidence, reputationSignals }, null, 2)}`;
 
     // ---- 6) Azure OpenAI config ----
@@ -93,7 +93,7 @@ module.exports = async function (context, req) {
       apiVersion,
       prompt: finalPrompt,
       temperature: 0.2,
-      maxOutTokens: 1300
+      maxOutTokens: 900
     });
 
     // ---- 8) Parse JSON (retry once if invalid) ----
@@ -108,7 +108,7 @@ module.exports = async function (context, req) {
         apiVersion,
         prompt: retryPrompt,
         temperature: 0.1,
-        maxOutTokens: 1300
+        maxOutTokens: 900
       });
 
       result = safeJsonParse(retryText);
@@ -123,8 +123,7 @@ module.exports = async function (context, req) {
     }
 
     // ---- 9) Minimal schema checks ----
-    // We ONLY require breakdown, keyFindings, verdict. We compute totalScore server-side.
-    if (!result || !result.breakdown || !result.keyFindings || !result.verdict) {
+    if (!result || !result.breakdown || !result.keyFindings) {
       context.res = {
         status: 502,
         headers: { "Content-Type": "application/json" },
@@ -133,23 +132,26 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // ✅ Fix #1: always compute totals server-side (prevents model arithmetic errors)
-    const computedTotal = computeTotalFromBreakdown(result.breakdown);
+    // ✅ Hard guardrails: clamp scores + enforce max values
+    const normalizedBreakdown = normalizeBreakdown(result.breakdown);
 
-    // ✅ Fix #2: reduce detail — keep scores only in breakdown, keep keyFindings
-    const slim = slimBreakdownToScoresOnly(result.breakdown);
+    // ✅ Always compute totals server-side from clamped values
+    const computedTotal = computeTotalFromNormalizedBreakdown(normalizedBreakdown);
 
-    // Build final response (clean + stable)
+    // ✅ Always compute verdict server-side (prevents contradictions)
+    const computedVerdict = computeVerdict(computedTotal, evidence);
+
+    // ✅ Keep key findings only (simple English expected from prompt)
     const response = {
       totalScore: computedTotal,
       maxScore: 100,
-      verdict: result.verdict,
+      verdict: computedVerdict,
       keyFindings: {
-        topRisks: Array.isArray(result.keyFindings.topRisks) ? result.keyFindings.topRisks : [],
-        topPositives: Array.isArray(result.keyFindings.topPositives) ? result.keyFindings.topPositives : [],
-        unknowns: Array.isArray(result.keyFindings.unknowns) ? result.keyFindings.unknowns : []
+        topRisks: safeStringArray(result.keyFindings.topRisks, 5),
+        topPositives: safeStringArray(result.keyFindings.topPositives, 5),
+        unknowns: safeStringArray(result.keyFindings.unknowns, 4)
       },
-      breakdown: slim
+      breakdown: normalizedBreakdown
     };
 
     context.res = {
@@ -166,50 +168,63 @@ module.exports = async function (context, req) {
   }
 };
 
-/* ----------------------------- Helpers: totals & slimming ----------------------------- */
+/* ----------------------------- Guardrails ----------------------------- */
 
-function computeTotalFromBreakdown(breakdown) {
-  const keys = [
-    "paymentSecurity",
-    "businessCredibility",
-    "domainWebsiteAge",
-    "shippingReturns",
-    "customerReviewsReputation",
-    "contactInfo",
-    "scamIndicators",
-    "overseasFulfilmentRisk"
-  ];
+function clampInt(n, min, max) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return min;
+  const v = Math.round(x);
+  return Math.max(min, Math.min(max, v));
+}
 
+function normalizeBreakdown(breakdown) {
+  const spec = {
+    paymentSecurity: 20,
+    businessCredibility: 20,
+    domainWebsiteAge: 10,
+    shippingReturns: 10,
+    customerReviewsReputation: 10,
+    contactInfo: 10,
+    scamIndicators: 10,
+    overseasFulfilmentRisk: 10
+  };
+
+  const out = {};
+  for (const [key, max] of Object.entries(spec)) {
+    const raw = breakdown && breakdown[key] ? breakdown[key] : {};
+    out[key] = {
+      score: clampInt(raw.score, 0, max),
+      max
+    };
+  }
+  return out;
+}
+
+function computeTotalFromNormalizedBreakdown(normalized) {
   let total = 0;
-  for (const k of keys) {
-    const s = breakdown && breakdown[k] ? Number(breakdown[k].score) : 0;
-    total += Number.isFinite(s) ? s : 0;
+  for (const item of Object.values(normalized || {})) {
+    total += Number(item.score) || 0;
   }
   return total;
 }
 
-function slimBreakdownToScoresOnly(breakdown) {
-  const defaults = {
-    paymentSecurity: { score: 0, max: 20 },
-    businessCredibility: { score: 0, max: 20 },
-    domainWebsiteAge: { score: 0, max: 10 },
-    shippingReturns: { score: 0, max: 10 },
-    customerReviewsReputation: { score: 0, max: 10 },
-    contactInfo: { score: 0, max: 10 },
-    scamIndicators: { score: 0, max: 10 },
-    overseasFulfilmentRisk: { score: 0, max: 10 }
-  };
+function computeVerdict(totalScore, evidence) {
+  // If evidence is extremely thin (e.g., homepage fetch failed), use Caution.
+  const homepageFetchFailed = Boolean(evidence && evidence.homepageFetchError);
+  const homepageSnippet = evidence?.homepage?.textSnippet || "";
+  const veryThin = homepageFetchFailed || homepageSnippet.trim().length < 300;
 
-  const out = { ...defaults };
-  for (const key of Object.keys(defaults)) {
-    const item = breakdown && breakdown[key] ? breakdown[key] : null;
-    const score = item ? Number(item.score) : 0;
-    out[key] = {
-      score: Number.isFinite(score) ? score : 0,
-      max: defaults[key].max
-    };
-  }
-  return out;
+  if (veryThin) return "Caution";
+  if (totalScore >= 75) return "Lower risk";
+  if (totalScore >= 50) return "Medium risk";
+  return "Higher risk";
+}
+
+function safeStringArray(arr, maxItems) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter(x => typeof x === "string" && x.trim().length > 0)
+    .slice(0, maxItems);
 }
 
 /* ----------------------------- Azure OpenAI call ----------------------------- */
@@ -285,7 +300,6 @@ async function collectEvidence(siteUrl) {
 
   const base = new URL(siteUrl);
 
-  // Homepage fetch is non-fatal (we include the error in evidence)
   let homepageHtml = "";
   let homepageFetchError = null;
   try {
@@ -351,7 +365,7 @@ function parseSignals(html, pageUrl) {
   const payment = [
     "paypal", "apple pay", "google pay", "visa", "mastercard", "american express", "amex",
     "afterpay", "zip", "klarna", "shop pay", "stripe",
-    "bank transfer", "direct deposit", "crypto", "bitcoin"
+    "bank transfer", "direct deposit", "crypto", "bitcoin", "unionpay"
   ].filter(k => lower.includes(k));
 
   const shipping = [
@@ -366,11 +380,11 @@ function parseSignals(html, pageUrl) {
 
   const credibility = [
     "abn", "acn", "gst", "contact", "address", "phone",
-    "privacy policy", "terms", "about", "store locator", "jurisdiction"
+    "privacy policy", "terms", "about", "store locator", "jurisdiction", "company"
   ].filter(k => lower.includes(k));
 
   const currency = [
-    "aud", "a$", "usd", "us$", "currency", "charged in", "fx", "foreign transaction",
+    "aud", "a$", "usd", "us$", "charged in", "foreign transaction",
     "presentment currency", "shop_currency", "presentment_currency", "currencycode", "money_format",
     "shopify.currency", "localization"
   ].filter(k => lower.includes(k));
