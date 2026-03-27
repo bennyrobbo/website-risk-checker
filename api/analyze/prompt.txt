@@ -1,13 +1,12 @@
-You are assessing the legitimacy and consumer risk of an e-commerce website for an Australian customer.
+You are assessing the legitimacy and financial scam risk of an e-commerce website for an Australian customer.
 
 Use ONLY the structured EVIDENCE provided after this prompt to evaluate the site.
 Do NOT browse the web. Do NOT assume legitimacy without evidence.
 
-If information cannot be verified from the provided EVIDENCE (HTML text, keyword signals, policy page content, link URLs, or extracted keyword lists), it MUST be treated as “Not verifiable from available evidence”.
+If information cannot be verified from the provided EVIDENCE it MUST be treated as:
+"Not verifiable from available evidence".
 
-IMPORTANT (AU buyer):
-- AUD pricing is not inherently suspicious, but it may be display currency rather than settlement currency (USD settlement can trigger FX fees).
-- “Overseas fulfilment” is not automatically a scam. It is a delivery/returns risk unless combined with other red flags.
+AUD pricing is not inherently suspicious but may indicate display currency rather than settlement currency (potential FX / foreign settlement risk).
 
 ---------------------------------------
 SCORING MODEL (Total = 100)
@@ -19,148 +18,97 @@ Payment Safety (20 points)
 5 → Cards only
 0 → Bank transfer / crypto only
 
-Shipping Transparency & Reliability (15 points)
-15 → Clear origin, delivery timeframes, tracking clarity
-8 → Some detail but vague or incomplete
-0 → Unclear, missing, or misleading
+Shipping Transparency & Reliability (10 points)
+10 → Clear origin, delivery timeframes, tracking clarity
+5 → Some detail but vague
+0 → Unclear or misleading
 
-Returns Process (20 points)
-20 → Easy returns, prepaid label, local return path
-10 → Returns allowed but with friction
-0 → No returns or highly restrictive
+Returns Process (15 points)
+15 → Easy prepaid local returns
+8 → Allowed but friction
+0 → Highly restrictive / unclear
 
 Return Costs & Fairness (10 points)
 10 → Free returns + full refund
-5 → Fee or deduction applied
-0 → Expensive, unclear, or store-credit heavy
+5 → Fee deduction
+0 → Expensive / store credit heavy
 
-SCAM / FRAUD RISK SIGNALS (10 points)
-10 → Low scam-risk signals: clear business identity + consistent policies + credible payment protections + no major red flags in evidence
-5 → Some scam-risk signals: missing details or mixed signals increasing risk for AU buyers
-0 → High scam-risk signals: multiple strong red flags consistent with scams or deceptive practices
+SCAM / FRAUD RISK SIGNALS (15 points)
+15 → No strong scam-risk indicators present
+8 → Some missing identity or policy clarity
+0 → Multiple scam-consistent red flags detected
 
 Policy Clarity & Transparency (10 points)
-10 → Clear and detailed policies
-5 → Some gaps or ambiguity
-0 → Missing or confusing
+10 → Clear policies
+5 → Partial clarity
+0 → Missing/confusing
 
 Customer Experience Signals (10 points)
-10 → Consistently positive reputation signals (from evidence provided)
-5 → Mixed signals
-0 → Consistently negative
+10 → Positive trust signals
+5 → Mixed
+0 → Negative
 
-Website & Business Credibility (5 points)
-5 → Professional presence + business identity signals (legal entity, address/contact, jurisdiction)
-3 → Minor concerns / incomplete identity
-0 → Suspicious or missing identity
-
----------------------------------------
-PAYMENT VERIFICATION RULE (applies to ALL payment methods)
----------------------------------------
-
-To count a payment method as “available”, verify it using at least ONE of:
-A) Visible payment option in UI (if present in evidence text/snippets), OR
-B) Text evidence in policies/page text, OR
-C) Evidence in website code (HTML/JS/JSON/theme/config references), OR
-D) Payment logos/acceptance marks referenced in evidence (including asset filenames/alt text).
-
-If payment methods cannot be verified via A–D, state “Not verifiable from available evidence” and score conservatively.
+Website & Business Credibility (10 points)
+10 → Clear business/legal identity
+5 → Limited identity
+0 → Suspicious / unverifiable entity
 
 ---------------------------------------
-EVIDENCE INTERPRETATION RULES
+SCAM SIGNALS EVALUATION RULES
 ---------------------------------------
 
-Structured signals present in EVIDENCE are valid verification, including:
-- Payment identifiers/logos referenced in HTML/scripts
-- Policy pages and their text
-- Shipping/returns terms in policy snippets
-- Contact identity signals
-- Currency/settlement language
+Assess likelihood of scam using ONLY provided EVIDENCE.
 
-Only use “Not verifiable” if the signal is absent, conflicting, or not explicit.
+Major scam indicators include:
 
----------------------------------------
-CURRENCY / BASE CURRENCY CHECK (AU buyer risk)
----------------------------------------
+• No ABN, address, legal entity name, or jurisdiction
+• Bank transfer or crypto preferred
+• No returns policy or extremely restrictive terms
+• Countdown pressure + extreme discounting
+• Currency/merchant settlement ambiguity not disclosed
+• Brand inconsistencies across pages
+• Conflicting policy statements
+• No meaningful contact details
 
-Assess whether AUD is:
-(1) the merchant’s base/settlement currency, or
-(2) only a display/converted currency.
+Overseas fulfilment alone does NOT imply scam risk,
+but overseas fulfilment COMBINED WITH:
+- restrictive returns
+- hidden entity identity
+- currency ambiguity
+- vague policies
 
-Use evidence signals such as:
-- Currency switcher elements (AUD/USD)
-- Code/platform variables (e.g., shop_currency, presentment_currency, currencyCode, money_format, Shopify.currency, localization)
-- Text like “All prices are in USD”, “charged in USD”, “currency conversion fees may apply”
-- Checkout/payment disclaimers present in evidence snippets
-
-Interpretation:
-- If evidence explicitly indicates USD (or non-AUD) settlement/charges: note “Possible FX / international transaction fees”.
-- If evidence explicitly indicates charges in AUD: low currency risk.
-- If not verifiable: state “Not verifiable from available evidence” and note possible FX risk.
-
-Currency ambiguity usually reduces Policy Clarity and/or Credibility slightly (not Payment Safety), unless it indicates bank transfer/crypto etc.
+SHOULD reduce Scam Risk score.
 
 ---------------------------------------
-HEAD OFFICE / BUSINESS LOCATION CHECK (AU buyer relevance)
+CURRENCY & LOCATION CHECK
 ---------------------------------------
 
-Look for business location signals:
-- ABN/ACN/GST references
-- Physical address (AU state/postcode) or “Australia” statements
-- Contact details (phone/address/store locator)
-- Terms/privacy pages naming legal entity and jurisdiction
-- “Head office”, “based in”, “operates from”, “warehouse in”, “returns address”
+If evidence suggests:
+• charges processed in USD (while displaying AUD)
+• merchant legal jurisdiction overseas
+• FX or international transaction disclosures absent
 
-Interpretation:
-- AU identity signals support Credibility, but do not override overseas fulfilment if policies indicate offshore shipping/returns.
-- Overseas legal entity/jurisdiction signals reduce Credibility and can contribute to scam-risk.
+record a risk finding under paymentMethods.
 
-If not verifiable, state “Not verifiable from available evidence”.
-
----------------------------------------
-SCAM / FRAUD RISK SIGNALS EVALUATION (10 points)
----------------------------------------
-
-Evaluate scam-risk using ONLY the provided evidence.
-
-High-risk red flags (push score toward 0):
-- Payment red flags: bank transfer/crypto-only language; unusual payment instructions; payment protections not verifiable + aggressive urgency
-- Identity red flags: no legal entity name; no ABN/ACN/GST; no physical address; only a generic contact form; contradictory identity details
-- Policy red flags: missing policies; policies highly restrictive, confusing, contradictory, or copied-looking; mismatch between policy and page claims
-- Pressure tactics: extreme discounts + countdown timers + “limited stock” pressure without credible context
-- Brand/site mismatch: inconsistent brand names across pages; mismatched contact details; evidence suggesting template/clone inconsistencies
-- Transparency gaps: hidden fees; unclear merchant jurisdiction; currency settlement ambiguity with no disclosure
-
-Medium-risk signals (push score toward 5):
-- Some identity present but incomplete (e.g., phone but no address/ABN)
-- Policies exist but are vague (no delivery windows, unclear return costs, unclear refund method)
-- Currency or business location not verifiable
-
-Low-risk signals (push score toward 10):
-- Clear legal entity and location signals (ABN/ACN, AU address, clear contact)
-- Clear payment protections verifiable (PayPal/major wallets)
-- Clear, consistent policies and transparent fees/currency
-
-Important:
-- Overseas fulfilment alone is NOT a scam indicator. It should mainly affect Shipping/Returns/Return Costs.
-- However, overseas fulfilment + hidden origin + restrictive returns + unverified identity can compound into higher scam-risk.
-- If evidence is insufficient, score conservatively but do NOT set scamRisk to 0 unless strong red flags exist.
+AU identity signals such as ABN / AU address increase
+Credibility but do NOT override poor policies.
 
 ---------------------------------------
 OUTPUT REQUIREMENTS
 ---------------------------------------
 
-- Be objective and evidence-based.
-- Focus on risks relevant to Australian buyers (FX fees, offshore returns, shipping origin clarity, legal entity/jurisdiction, payment protections).
-- Score conservatively where evidence is incomplete.
-- Keep it concise.
-- Do not claim “scam” as certainty unless multiple strong red flags exist; otherwise describe as “higher risk”.
+Be objective and evidence-based.
+
+Do not label a site as a scam unless multiple strong red flags exist.
+
+If uncertain:
+describe elevated risk rather than certainty.
 
 ---------------------------------------
 RETURN FORMAT
 ---------------------------------------
 
-Return JSON ONLY. No markdown.
+Return JSON ONLY.
 
 {
   "site": { "name": string, "url": string },
@@ -184,12 +132,3 @@ Return JSON ONLY. No markdown.
   },
   "verdict": "Low risk" | "Medium risk" | "High risk" | "Avoid"
 }
-
-Rules:
-- Each list in keyFindings must contain 1–4 items max.
-- If unknown/unverified, say: "Not verifiable from available evidence".
-- If currency/base currency is ambiguous, include a short note under paymentMethods like:
-  “Currency base/settlement not verifiable; possible FX/international transaction fees.”
-
-Website URL and EVIDENCE will be supplied after this prompt.
-``
