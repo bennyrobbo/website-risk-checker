@@ -100,19 +100,21 @@ EXTERNAL REPUTATION SIGNALS (use ONLY if provided)
 ---------------------------------------
 
 EVIDENCE may include reputationSignals gathered from independent sites such as:
-- Trustpilot
-- ScamAdviser
-- ProductReview.com.au
+- Trustpilot (trustpilot.rating, trustpilot.reviewCount)
+- ScamAdviser (scamadviser.trustScoreOutOf100)
+- ProductReview.com.au (productReviewAu.rating, productReviewAu.reviewCount, productReviewAu.listingUrl)
 
 Rules:
 - Only use external reputation evidence if reputationSignals is present in EVIDENCE.
 - Do NOT invent ratings, review counts, or trust scores.
 - Do NOT treat on-site testimonials as independent reputation.
+- Absence of a listing is NOT proof of legitimacy or scam; treat as “not found” / “not verifiable”.
 
-Interpretation:
-- Very low ratings / very low trust scores / high complaint indicators (if present) should reduce customerExperience and/or scamRisk.
-- Absence of a listing is NOT proof of legitimacy or scam; treat as “not found” / “not verifiable” rather than a negative.
-- If external sources are blocked or unavailable, note "Not verifiable from available evidence".
+Interpretation guidance:
+- Very low Trustpilot rating (<3.0) with meaningful reviewCount should reduce customerExperience and may reduce scamRisk.
+- ScamAdviser trustScoreOutOf100 below 30 should reduce scamRisk.
+- A single listing with low rating on ProductReview.com.au should reduce customerExperience and may reduce scamRisk.
+- If external sources are blocked or unavailable, state "Not verifiable from available evidence".
 
 ---------------------------------------
 CURRENCY & LOCATION CHECK
