@@ -9,7 +9,6 @@ module.exports = async function (context, req) {
     // ---- 1) Parse + validate input ----
     let body = req.body;
 
-    // Some runtimes pass body as string
     if (typeof body === "string") {
       try { body = JSON.parse(body); } catch { body = {}; }
     }
@@ -47,13 +46,17 @@ module.exports = async function (context, req) {
     // ---- 3) Collect evidence (homepage + key policy pages) ----
     const evidence = await collectEvidence(target.href);
 
-    // ---- 4) Build final prompt ----
+    // ---- 4) Collect reputation signals (external review sites) ----
+    // Lightweight parsing only (ratings/counts/scores). No long review text.
+    const reputationSignals = await collectReputationSignals(target.hostname);
+
+    // ---- 5) Build final prompt ----
     const finalPrompt =
       `${basePrompt}\n\nWebsite URL: ${target.href}\n\n` +
       `EVIDENCE (use ONLY this evidence; if missing, mark Not verifiable):\n` +
-      `${JSON.stringify(evidence, null, 2)}`;
+      `${JSON.stringify({ ...evidence, reputationSignals }, null, 2)}`;
 
-    // ---- 5) Azure OpenAI config ----
+    // ---- 6) Azure OpenAI config ----
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT;      // e.g. https://xxxx.openai.azure.com
     const apiKey = process.env.AZURE_OPENAI_KEY;             // key for SAME resource
     const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;  // deployment NAME (not model name)
@@ -67,9 +70,8 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // ---- 6) Call model (JSON-only) ----
+    // ---- 7) Call model (JSON-only) ----
     // Newer GPT-5.x deployments may reject max_tokens and require max_completion_tokens. [2](https://tiegear.com/collections/glow)[3](https://play.google.com/store/apps/details/PayPal_Pay_Send_Save?id=com.paypal.android.p2pmobile&hl=en)
-    // We try max_completion_tokens first, then fall back to max_tokens only if needed.
     const modelText = await callChatCompletionsWithTokenFallback({
       endpoint,
       apiKey,
@@ -77,10 +79,10 @@ module.exports = async function (context, req) {
       apiVersion,
       prompt: finalPrompt,
       temperature: 0.2,
-      maxOutTokens: 1100
+      maxOutTokens: 1200
     });
 
-    // ---- 7) Parse JSON (retry once if invalid) ----
+    // ---- 8) Parse JSON (retry once if invalid) ----
     let result = safeJsonParse(modelText);
     if (!result) {
       const retryPrompt =
@@ -93,7 +95,7 @@ module.exports = async function (context, req) {
         apiVersion,
         prompt: retryPrompt,
         temperature: 0.1,
-        maxOutTokens: 1100
+        maxOutTokens: 1200
       });
 
       result = safeJsonParse(retryText);
@@ -103,8 +105,14 @@ module.exports = async function (context, req) {
       }
     }
 
-    // ---- 8) Minimal schema sanity checks ----
-    if (!result || typeof result.totalScore !== "number" || !result.breakdown || !result.keyFindings || !result.verdict) {
+    // ---- 9) Minimal schema sanity checks ----
+    if (
+      !result ||
+      typeof result.totalScore !== "number" ||
+      !result.breakdown ||
+      !result.keyFindings ||
+      !result.verdict
+    ) {
       context.res = { status: 502, body: { error: "Invalid JSON structure from model" } };
       return;
     }
@@ -120,11 +128,9 @@ module.exports = async function (context, req) {
 };
 
 /* ----------------------------- Azure OpenAI call ----------------------------- */
-/*
-  Uses Azure OpenAI Chat Completions REST endpoint format. [1](https://tiegear.com/collections/pax)
-*/
+/* Uses Azure OpenAI Chat Completions REST endpoint format. [1](https://tiegear.com/collections/pax) */
 async function callChatCompletionsWithTokenFallback({ endpoint, apiKey, deployment, apiVersion, prompt, temperature, maxOutTokens }) {
-  // Try max_completion_tokens first (required for some newer models). [2](https://tiegear.com/collections/glow)[3](https://play.google.com/store/apps/details/PayPal_Pay_Send_Save?id=com.paypal.android.p2pmobile&hl=en)
+  // Try max_completion_tokens first (required for some newer deployments). [2](https://tiegear.com/collections/glow)[3](https://play.google.com/store/apps/details/PayPal_Pay_Send_Save?id=com.paypal.android.p2pmobile&hl=en)
   try {
     return await callChatCompletions({
       endpoint,
@@ -139,7 +145,7 @@ async function callChatCompletionsWithTokenFallback({ endpoint, apiKey, deployme
   } catch (err) {
     const msg = String(err && err.message ? err.message : err);
 
-    // If the model complains about max_completion_tokens, retry with max_tokens
+    // If it complains about max_completion_tokens, try legacy max_tokens
     if (msg.includes("Unsupported parameter") && msg.includes("max_completion_tokens")) {
       return await callChatCompletions({
         endpoint,
@@ -153,7 +159,6 @@ async function callChatCompletionsWithTokenFallback({ endpoint, apiKey, deployme
       });
     }
 
-    // Otherwise bubble up
     throw err;
   }
 }
@@ -169,7 +174,6 @@ async function callChatCompletions({ endpoint, apiKey, deployment, apiVersion, p
     temperature
   };
 
-  // Add correct token parameter name
   payload[tokenParamName] = maxOutTokens;
 
   const res = await fetch(url, {
@@ -184,16 +188,13 @@ async function callChatCompletions({ endpoint, apiKey, deployment, apiVersion, p
   const text = await res.text();
 
   if (!res.ok) {
-    // Keep the full body so the UI can show the exact error
     throw new Error(`Azure OpenAI error ${res.status}: ${text}`);
   }
 
-  // Azure chat completions response is JSON; content sits at choices[0].message.content
   let json;
   try {
     json = JSON.parse(text);
   } catch {
-    // If the service returned non-JSON for some reason
     return text;
   }
 
@@ -213,15 +214,15 @@ function safeJsonParse(text) {
 /* ----------------------------- Evidence gathering ---------------------------- */
 
 async function collectEvidence(siteUrl) {
-  const MAX_CHARS = 18000;     // cap prompt size
-  const TIMEOUT_MS = 9000;     // fast fail
-  const MAX_POLICY_PAGES = 3;  // keep cheap + quick
+  const MAX_CHARS = 18000;
+  const TIMEOUT_MS = 9000;
+  const MAX_POLICY_PAGES = 3;
 
   const base = new URL(siteUrl);
 
   const homepageHtml = await fetchText(base.href, TIMEOUT_MS);
-
   const homepageSignals = parseSignals(homepageHtml, base.href);
+
   const policyLinks = findPolicyLinks(homepageHtml, base.href).slice(0, MAX_POLICY_PAGES);
 
   const policyPages = [];
@@ -234,10 +235,7 @@ async function collectEvidence(siteUrl) {
         textSnippet: compactText(html, MAX_CHARS)
       });
     } catch (e) {
-      policyPages.push({
-        url: link,
-        error: `Fetch failed: ${String(e)}`
-      });
+      policyPages.push({ url: link, error: `Fetch failed: ${String(e)}` });
     }
   }
 
@@ -263,12 +261,9 @@ async function fetchText(url, timeoutMs) {
       redirect: "follow",
       signal: controller.signal,
       headers: {
-        // Helps with basic bot filtering
         "User-Agent": "Mozilla/5.0 (compatible; WebsiteRiskChecker/1.0)"
       }
     });
-
-    // We still return the HTML even if non-200; the model can use any text available.
     const text = await res.text();
     return text || "";
   } finally {
@@ -279,7 +274,6 @@ async function fetchText(url, timeoutMs) {
 function parseSignals(html, pageUrl) {
   const lower = (html || "").toLowerCase();
 
-  // Payment keyword signals (logos often appear in HTML filenames/alt text too)
   const payment = [
     "paypal", "apple pay", "google pay", "visa", "mastercard", "american express", "amex",
     "afterpay", "zip", "klarna", "shop pay", "stripe",
@@ -298,7 +292,14 @@ function parseSignals(html, pageUrl) {
 
   const credibility = [
     "abn", "acn", "gst", "contact", "address", "phone",
-    "privacy policy", "terms", "about", "store locator"
+    "privacy policy", "terms", "about", "store locator", "jurisdiction"
+  ].filter(k => lower.includes(k));
+
+  // Currency clues for AU buyer
+  const currency = [
+    "aud", "a$", "usd", "us$", "currency", "charged in", "fx", "foreign transaction",
+    "presentment currency", "shop_currency", "presentment_currency", "currencycode", "money_format",
+    "shopify.currency", "localization"
   ].filter(k => lower.includes(k));
 
   return {
@@ -306,12 +307,14 @@ function parseSignals(html, pageUrl) {
     paymentKeywords: uniq(payment),
     shippingKeywords: uniq(shipping),
     returnsKeywords: uniq(returns),
-    credibilityKeywords: uniq(credibility)
+    credibilityKeywords: uniq(credibility),
+    currencyKeywords: uniq(currency)
   };
 }
 
 function findPolicyLinks(html, baseUrl) {
   const links = [];
+  // Capture href="..." or href='...'
   const hrefRe = /href\s*=\s*["']([^"']+)["']/gi;
 
   let m;
@@ -336,7 +339,6 @@ function findPolicyLinks(html, baseUrl) {
     }
   }
 
-  // same-origin only + de-dupe
   const base = new URL(baseUrl);
   return uniq(links).filter(l => {
     try { return new URL(l).origin === base.origin; } catch { return false; }
@@ -368,29 +370,143 @@ function uniq(arr) {
   return Array.from(new Set(arr));
 }
 
+/* --------------------------- Reputation signals --------------------------- */
+
+async function collectReputationSignals(hostname) {
+  const domain = normalizeDomain(hostname);
+  const TIMEOUT_MS = 9000;
+
+  const out = {
+    domain,
+    trustpilot: { checked: false, found: false },
+    scamadviser: { checked: false, found: false },
+    productReviewAu: { checked: false, found: false }
+  };
+
+  // Trustpilot: deterministic URL by domain
+  // https://www.trustpilot.com/review/{domain}
+  try {
+    out.trustpilot.checked = true;
+    const url = `https://www.trustpilot.com/review/${domain}`;
+    const html = await fetchText(url, TIMEOUT_MS);
+    const parsed = parseTrustpilot(html);
+    out.trustpilot = { checked: true, url, ...parsed };
+  } catch (e) {
+    out.trustpilot.error = String(e);
+  }
+
+  // ScamAdviser: deterministic URL
+  // https://www.scamadviser.com/check-website/{domain}
+  try {
+    out.scamadviser.checked = true;
+    const url = `https://www.scamadviser.com/check-website/${domain}`;
+    const html = await fetchText(url, TIMEOUT_MS);
+    const parsed = parseScamadviser(html);
+    out.scamadviser = { checked: true, url, ...parsed };
+  } catch (e) {
+    out.scamadviser.error = String(e);
+  }
+
+  // ProductReview.com.au: search page by domain (best-effort)
+  try {
+    out.productReviewAu.checked = true;
+    const url = `https://www.productreview.com.au/search?q=${encodeURIComponent(domain)}`;
+    const html = await fetchText(url, TIMEOUT_MS);
+    const parsed = parseProductReviewSearch(html);
+    out.productReviewAu = { checked: true, url, ...parsed };
+  } catch (e) {
+    out.productReviewAu.error = String(e);
+  }
+
+  return out;
+}
+
+function normalizeDomain(hostname) {
+  let h = String(hostname || "").toLowerCase();
+  if (h.startsWith("www.")) h = h.slice(4);
+  return h;
+}
+
+function parseTrustpilot(html) {
+  const lower = (html || "").toLowerCase();
+  // If page doesn't exist, Trustpilot often contains "We couldn't find any reviews"
+  const notFound = lower.includes("couldn't find any reviews") || lower.includes("not found");
+  const found = !notFound && lower.includes("trustpilot");
+
+  // Attempt to parse rating and review count (best-effort; layout may change)
+  const rating = firstNumberMatch(html, /Rated\s*([0-9.]+)\s*\/\s*5/i) ||
+                 firstNumberMatch(html, /TrustScore\s*([0-9.]+)/i) ||
+                 null;
+
+  const reviews = firstIntMatch(html, /([0-9,]+)\s+reviews/i) ||
+                  firstIntMatch(html, /Based on\s+([0-9,]+)\s+reviews/i) ||
+                  null;
+
+  return {
+    found: Boolean(found),
+    rating: rating !== null ? Number(rating) : null,
+    reviewCount: reviews !== null ? reviews : null
+  };
+}
+
+function parseScamadviser(html) {
+  const lower = (html || "").toLowerCase();
+  const found = lower.includes("scamadviser") && (lower.includes("trustscore") || lower.includes("trust score") || lower.includes("score"));
+
+  const score =
+    firstIntMatch(html, /Trustscore\s*[:\-]?\s*([0-9]{1,3})/i) ||
+    firstIntMatch(html, /Trust\s*Score\s*[:\-]?\s*([0-9]{1,3})/i) ||
+    firstIntMatch(html, /score\s*[:\-]?\s*([0-9]{1,3})\s*\/\s*100/i) ||
+    null;
+
+  return {
+    found: Boolean(found),
+    trustScoreOutOf100: score !== null ? score : null
+  };
+}
+
+function parseProductReviewSearch(html) {
+  const lower = (html || "").toLowerCase();
+  // Best-effort: detect whether results likely exist
+  const found = lower.includes("productreview") && (lower.includes("search results") || lower.includes("results") || lower.includes("/listings/"));
+  // Try to extract a first listing URL if present
+  const firstListing = firstStringMatch(html, /href\s*=\s*["'](\/listings\/[^"']+)["']/i);
+  return {
+    found: Boolean(found),
+    firstListingPath: firstListing || null
+  };
+}
+
+function firstNumberMatch(text, regex) {
+  const m = String(text || "").match(regex);
+  return m && m[1] ? m[1] : null;
+}
+
+function firstIntMatch(text, regex) {
+  const m = String(text || "").match(regex);
+  if (!m || !m[1]) return null;
+  const n = parseInt(String(m[1]).replace(/,/g, ""), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function firstStringMatch(text, regex) {
+  const m = String(text || "").match(regex);
+  return m && m[1] ? m[1] : null;
+}
+
 /* ----------------------------- SSRF helper ----------------------------- */
 
 function isPrivateIp(hostname) {
-  // Only applies if hostname is an IPv4 address
   const m = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;
 
   const a = Number(m[1]), b = Number(m[2]), c = Number(m[3]), d = Number(m[4]);
   if ([a, b, c, d].some(n => n < 0 || n > 255)) return true;
 
-  // 10.0.0.0/8
   if (a === 10) return true;
-
-  // 127.0.0.0/8
   if (a === 127) return true;
-
-  // 172.16.0.0/12
   if (a === 172 && b >= 16 && b <= 31) return true;
-
-  // 192.168.0.0/16
   if (a === 192 && b === 168) return true;
-
-  // 169.254.0.0/16 (link-local)
   if (a === 169 && b === 254) return true;
 
   return false;
